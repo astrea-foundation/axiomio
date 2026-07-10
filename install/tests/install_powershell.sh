@@ -15,9 +15,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TEST_ROOT/release" "$TEST_ROOT/install/AxiomIO"
-printf 'fake NSIS setup executable\n' > "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe"
-printf 'fake installed desktop executable\n' > "$TEST_ROOT/install/AxiomIO/axiomio.exe"
+mkdir -p "$TEST_ROOT/release" "$TEST_ROOT/install/AxiomIO" "$TEST_ROOT/install/legacy"
+cat > "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=""
+for argument in "$@"; do
+  case "$argument" in
+    /D=*) destination="${argument#/D=}" ;;
+  esac
+done
+destination="${destination%\"}"
+destination="${destination#\"}"
+[[ -n "$destination" ]]
+mkdir -p "$destination"
+printf 'upgraded desktop executable\n' > "$destination/axiomio.exe"
+SCRIPT
+chmod +x "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe"
+printf 'old desktop executable\n' > "$TEST_ROOT/install/AxiomIO/axiomio.exe"
+printf 'legacy cli\n' > "$TEST_ROOT/install/legacy/axiom.exe"
+printf 'legacy proxy\n' > "$TEST_ROOT/install/legacy/axiom-proxy-headless.exe"
 (
   cd "$TEST_ROOT/release"
   sha256sum axiomio-windows-x86_64-setup.exe > SHA256SUMS
@@ -41,14 +58,17 @@ docker run --rm \
   -v "$ROOT:/work:ro" \
   -v "$TEST_ROOT/install:/output" \
   "$IMAGE" \
-  pwsh -NoProfile -File /work/install/install.ps1 \
+  pwsh -NoProfile -File /work/install/axiomup.ps1 \
     -DownloadBase "http://127.0.0.1:$PORT" \
     -DesktopInstallDir /output/AxiomIO \
+    -LegacyInstallDir /output/legacy \
     -SkipDesktopInstall \
     -SkipPathUpdate \
     -SkipOpenCode
 
-[[ -f "$TEST_ROOT/install/AxiomIO/axiomio.exe" ]]
+grep -Fq 'old desktop executable' "$TEST_ROOT/install/AxiomIO/axiomio.exe"
+[[ ! -e "$TEST_ROOT/install/legacy/axiom.exe" ]]
+[[ ! -e "$TEST_ROOT/install/legacy/axiom-proxy-headless.exe" ]]
 
 printf 'tampered' >> "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe"
 if docker run --rm \
@@ -56,7 +76,7 @@ if docker run --rm \
   -v "$ROOT:/work:ro" \
   -v "$TEST_ROOT/install:/output" \
   "$IMAGE" \
-  pwsh -NoProfile -File /work/install/install.ps1 \
+  pwsh -NoProfile -File /work/install/axiomup.ps1 \
     -DownloadBase "http://127.0.0.1:$PORT" \
     -DesktopInstallDir /output/AxiomIO \
     -SkipDesktopInstall \

@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity,
   AlertTriangle,
+  ArrowUpCircle,
   Ban,
   Check,
   CheckCircle2,
@@ -30,6 +31,7 @@ import {
   type ProxyConfig,
   type ProxyStatus,
   type RequestLogEntry,
+  type UpdateInfo,
 } from "./lib/tauri";
 
 function withWindow(action: (window: ReturnType<typeof getCurrentWindow>) => Promise<void>) {
@@ -57,6 +59,23 @@ export function App() {
   const [apiKeyPresent, setApiKeyPresent] = useState(false);
   const [masked, setMasked] = useState<string | null>(null);
   const [tab, setTab] = useState<"home" | "trust" | "history" | "settings">("home");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .checkForUpdate()
+      .then((info) => {
+        if (!cancelled && info.available) setUpdateInfo(info);
+      })
+      .catch(() => {
+        /* offline, rate-limited, or unavailable — stay silent */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -95,7 +114,18 @@ export function App() {
             AxiomIO
           </div>
         </div>
-        <nav className="flex shrink-0 items-center gap-0.5" role="tablist" aria-label="Sections">
+        {updateInfo && (
+          <button
+            onClick={() => setUpdateOpen(true)}
+            aria-label={`Update available: v${updateInfo.latestVersion}`}
+            title={`Update available: v${updateInfo.latestVersion}`}
+            className="ml-1 flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-border-accent)] bg-[var(--color-cherry-glow)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-cherry-bright)] transition-colors hover:bg-[var(--color-bg-surface-hover)]"
+          >
+            <ArrowUpCircle size={11} />
+            Update
+          </button>
+        )}
+        <nav className="ml-1 flex shrink-0 items-center gap-0.5" role="tablist" aria-label="Sections">
           <TabButton
             active={tab === "home"}
             onClick={() => setTab("home")}
@@ -141,6 +171,12 @@ export function App() {
         {tab === "history" && <HistoryTab open={tab === "history"} />}
         {tab === "settings" && <SettingsTab />}
       </main>
+
+      <AnimatePresence>
+        {updateOpen && updateInfo && (
+          <UpdatePanel info={updateInfo} onClose={() => setUpdateOpen(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -184,6 +220,82 @@ function WindowButton({ label, onClick, icon }: { label: string; onClick: () => 
     >
       {icon}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Update — dismissible popover with the exact platform update command
+// ---------------------------------------------------------------------------
+
+function UpdatePanel({ info, onClose }: { info: UpdateInfo; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const copyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(info.command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard access may be unavailable; keep the command selectable */
+    }
+  };
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="absolute inset-0 z-20"
+        onClick={onClose}
+      />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Update available"
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.15 }}
+        className="absolute inset-x-2 top-9 z-30 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-lg"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[12px] font-medium">Update to v{info.latestVersion}</div>
+          <button
+            onClick={onClose}
+            aria-label="Dismiss"
+            className="rounded-md p-0.5 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <p className="mt-1 text-[10.5px] leading-[14px] text-[var(--color-text-tertiary)]">
+          Quit AxiomIO, then run:
+        </p>
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-input)] px-2 py-1.5">
+          <code className="min-w-0 flex-1 break-all font-mono text-[10.5px] leading-[14px] text-[var(--color-text-secondary)]">
+            {info.command}
+          </code>
+          <button
+            onClick={copyCommand}
+            aria-label={copied ? "Copied" : "Copy update command"}
+            title={copied ? "Copied" : "Copy update command"}
+            className="shrink-0 rounded-md p-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-bg-surface-hover)] hover:text-[var(--color-text-secondary)]"
+          >
+            {copied ? <Check size={12} className="text-[var(--color-cherry-bright)]" /> : <Copy size={12} />}
+          </button>
+        </div>
+      </motion.div>
+    </>
   );
 }
 

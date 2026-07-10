@@ -22,18 +22,19 @@ rg -Fq 'axiomio-linux-${{ matrix.arch }}.AppImage' "$ROOT/.github/workflows/rele
 rg -Fq 'axiomio-macos-${{ matrix.arch }}.app.tar.gz' "$ROOT/.github/workflows/release.yml"
 rg -Fq 'axiomio-macos-${{ matrix.arch }}.dmg' "$ROOT/.github/workflows/release.yml"
 rg -Fq 'axiomio-windows-${{ matrix.arch }}-setup.exe' "$ROOT/.github/workflows/release.yml"
-rg -Fq 'axiomio-linux-${arch}.AppImage' "$ROOT/install/install.sh"
-rg -Fq 'axiomio-macos-${arch}.app.tar.gz' "$ROOT/install/install.sh"
-rg -Fq 'axiomio-windows-$architecture-setup.exe' "$ROOT/install/install.ps1"
-rg -Fq 'astrea-foundation/axiomio' "$ROOT/install/install.sh" "$ROOT/install/install.ps1"
-rg -Fq 'SHA256SUMS' "$ROOT/install/install.sh" "$ROOT/install/install.ps1" \
+rg -Fq 'axiomio-linux-${arch}.AppImage' "$ROOT/install/axiomup.sh"
+rg -Fq 'axiomio-macos-${arch}.app.tar.gz' "$ROOT/install/axiomup.sh"
+rg -Fq 'axiomio-windows-$architecture-setup.exe' "$ROOT/install/axiomup.ps1"
+rg -Fq 'astrea-foundation/axiomio' "$ROOT/install/axiomup.sh" "$ROOT/install/axiomup.ps1"
+rg -Fq 'SHA256SUMS' "$ROOT/install/axiomup.sh" "$ROOT/install/axiomup.ps1" \
   "$ROOT/.github/workflows/release.yml"
-rg -Fq 'Start-Process' "$ROOT/install/install.ps1"
-rg -Fq 'configure opencode' "$ROOT/install/install.sh" "$ROOT/install/install.ps1"
+rg -Fq 'Start-Process' "$ROOT/install/axiomup.ps1"
+rg -Fq 'configure opencode' "$ROOT/install/axiomup.sh" "$ROOT/install/axiomup.ps1"
+rg -Fq 'axiom.stream/axiomup.sh' "$ROOT/install/README.md"
+rg -Fq 'axiom.stream/axiomup.ps1' "$ROOT/install/README.md"
 
 if rg -n '(axiom-proxy-headless|axiom\.exe|cli/target)' \
-  "$ROOT/install/install.sh" "$ROOT/install/install.ps1" \
-  "$ROOT/install/README.md" "$ROOT/.github/workflows/release.yml"; then
+  "$ROOT/.github/workflows/release.yml"; then
   echo "release contract still references obsolete binaries" >&2
   exit 1
 fi

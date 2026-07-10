@@ -1,6 +1,6 @@
-# AxiomIO Desktop Installers
+# AxiomUp
 
-The bootstrap installers download and verify the native AxiomIO desktop
+The AxiomUp scripts install or upgrade the native AxiomIO desktop
 application from the public
 [`astrea-foundation/axiomio`](https://github.com/astrea-foundation/axiomio)
 releases. The application contains one executable named `axiomio`:
@@ -15,29 +15,29 @@ before installation.
 ## Linux
 
 ```bash
-curl -fsSL https://axiom.stream/install.sh | bash
+curl -fsSL https://axiom.stream/axiomup.sh | bash
 ```
 
-The installer places the AppImage under `~/.local/share/axiomio`, creates an
-`axiomio` symlink in `~/.local/bin`, and installs a desktop entry and icon under
-`~/.local/share`. Override these locations with `AXIOM_DESKTOP_DIR`,
+The script atomically replaces the AppImage under `~/.local/share/axiomio`,
+creates an `axiomio` symlink in `~/.local/bin`, and installs a desktop entry and
+icon under `~/.local/share`. Override these locations with `AXIOM_DESKTOP_DIR`,
 `AXIOM_INSTALL_DIR`, `AXIOM_DESKTOP_ENTRY_DIR`, and `AXIOM_ICON_DIR`.
 
 ## macOS
 
 ```bash
-curl -fsSL https://axiom.stream/install.sh | bash
+curl -fsSL https://axiom.stream/axiomup.sh | bash
 ```
 
-The installer places `AxiomIO.app` in `~/Applications` and links its executable
-as `~/.local/bin/axiomio`. Override these locations with
+The script replaces `AxiomIO.app` in `~/Applications` with rollback protection
+and links its executable as `~/.local/bin/axiomio`. Override these locations with
 `AXIOM_APPLICATIONS_DIR` and `AXIOM_INSTALL_DIR`. Releases also include DMGs for
 manual drag-and-drop installation.
 
 The source-controlled Unix installer is available at:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/astrea-foundation/axiomio/main/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/astrea-foundation/axiomio/main/install/axiomup.sh | bash
 ```
 
 ## Windows
@@ -45,17 +45,17 @@ curl -fsSL https://raw.githubusercontent.com/astrea-foundation/axiomio/main/inst
 Run in PowerShell:
 
 ```powershell
-irm https://axiom.stream/install.ps1 | iex
+irm https://axiom.stream/axiomup.ps1 | iex
 ```
 
-The installer runs the per-user NSIS setup and adds its AxiomIO directory to the
-user `PATH`. The default location is `%LOCALAPPDATA%\AxiomIO`; override it with
+The script runs the per-user NSIS setup in upgrade mode and adds its AxiomIO
+directory to the user `PATH`. The default location is `%LOCALAPPDATA%\AxiomIO`; override it with
 `AXIOM_DESKTOP_INSTALL_DIR`.
 
 The source-controlled PowerShell installer is available at:
 
 ```powershell
-irm https://raw.githubusercontent.com/astrea-foundation/axiomio/main/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/astrea-foundation/axiomio/main/install/axiomup.ps1 | iex
 ```
 
 ## OpenCode
@@ -78,6 +78,14 @@ axiomio configure opencode --config /path/to/opencode.jsonc
 The generated provider uses `http://127.0.0.1:8484/v1`. Its placeholder API key
 is intentionally not an Axiom relay credential; the `axm_` key remains local to
 the AxiomIO process.
+
+## Upgrades
+
+Run the same AxiomUp command again to upgrade an existing installation. Downloads
+and checksums complete before the installed desktop application is replaced.
+Quit AxiomIO before upgrading on Windows. When both legacy `axiom` and
+`axiom-proxy-headless` executables are found in the previous install directory,
+AxiomUp removes them only after the desktop application installs successfully.
 
 ## Versions and mirrors
 

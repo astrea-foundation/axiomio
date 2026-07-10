@@ -16,7 +16,7 @@ crates/axiom-core     E2EE + attestation verification + relay client (pure Rust,
 crates/axiom-server   axum HTTP surface + headless and agent-setup logic
 src-tauri             `axiomio` executable: desktop, --headless, and configuration
 ui                    React + Vite + Tailwind dashboard
-install               Linux, macOS, and Windows bootstrap installers
+install               Linux, macOS, and Windows AxiomUp scripts
 fixtures              committed cross-language E2EE protocol vectors
 ```
 
@@ -39,13 +39,13 @@ AXIOM_PROXY_API_KEY=axm_... AXIOM_PROXY_BACKEND=https://api.axiom.stream \
 Linux and macOS:
 
 ```bash
-curl -fsSL https://axiom.stream/install.sh | bash
+curl -fsSL https://axiom.stream/axiomup.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://axiom.stream/install.ps1 | iex
+irm https://axiom.stream/axiomup.ps1 | iex
 ```
 
 The branded scripts install the checksummed desktop application from this

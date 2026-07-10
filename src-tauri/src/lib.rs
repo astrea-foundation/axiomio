@@ -7,6 +7,7 @@ mod commands;
 mod keyring;
 mod server_handle;
 mod tray;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -90,6 +91,7 @@ pub fn run() {
             commands::verify_model,
             commands::get_attestations,
             commands::get_recent_requests,
+            update::check_for_update,
         ])
         .setup(move |app| {
             tray::build_tray(app.handle())?;

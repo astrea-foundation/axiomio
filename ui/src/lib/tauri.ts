@@ -100,6 +100,13 @@ export function isFullyVerified(entry: RequestLogEntry): boolean {
   );
 }
 
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  command: string;
+}
+
 export interface ProxyConfig {
   port: number;
   backend_url: string;
@@ -124,6 +131,7 @@ export const api = {
     invoke<AttestationSummary>("verify_model", { modelId, force }),
   getAttestations: () => invoke<AttestationSummary[]>("get_attestations"),
   getRecentRequests: (limit: number) => invoke<RequestLogEntry[]>("get_recent_requests", { limit }),
+  checkForUpdate: () => invoke<UpdateInfo>("check_for_update"),
 };
 
 export function onStatus(cb: (s: ProxyStatus) => void): Promise<UnlistenFn> {

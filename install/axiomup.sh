@@ -7,9 +7,11 @@ INSTALL_DIR="${AXIOM_INSTALL_DIR:-$HOME/.local/bin}"
 DESKTOP_DIR="${AXIOM_DESKTOP_DIR:-$HOME/.local/share/axiomio}"
 APPLICATIONS_DIR="${AXIOM_APPLICATIONS_DIR:-$HOME/Applications}"
 TEMPORARY=""
+ROLLBACK_APP=""
+ROLLBACK_TARGET=""
 
 fail() {
-  echo "axiomio installer: $*" >&2
+  echo "axiomup: $*" >&2
   exit 1
 }
 
@@ -83,8 +85,24 @@ verify_download() {
 }
 
 cleanup() {
+  if [[ -n "$ROLLBACK_APP" && -e "$ROLLBACK_APP" ]]; then
+    if [[ -n "$ROLLBACK_TARGET" && ! -e "$ROLLBACK_TARGET" ]]; then
+      mv "$ROLLBACK_APP" "$ROLLBACK_TARGET" || true
+    else
+      rm -rf "$ROLLBACK_APP"
+    fi
+  fi
   if [[ -n "$TEMPORARY" ]]; then
     rm -rf "$TEMPORARY"
+  fi
+}
+
+migrate_legacy_install() {
+  local legacy_cli="$INSTALL_DIR/axiom"
+  local legacy_proxy="$INSTALL_DIR/axiom-proxy-headless"
+  if [[ -e "$legacy_cli" && -e "$legacy_proxy" ]]; then
+    rm -f "$legacy_cli" "$legacy_proxy"
+    echo "Removed the legacy two-binary AxiomIO installation"
   fi
 }
 
@@ -94,6 +112,7 @@ install_linux() {
   local asset="axiomio-linux-${arch}.AppImage"
   local icon_asset="axiomio-icon.png"
   local executable="$DESKTOP_DIR/AxiomIO.AppImage"
+  local staged="$DESKTOP_DIR/.AxiomIO.AppImage.new.$$"
   local icon_dir="${AXIOM_ICON_DIR:-$HOME/.local/share/icons/hicolor/128x128/apps}"
   local applications_dir="${AXIOM_DESKTOP_ENTRY_DIR:-$HOME/.local/share/applications}"
 
@@ -104,7 +123,8 @@ install_linux() {
   verify_download "$TEMPORARY/$icon_asset" "$icon_asset"
 
   mkdir -p "$DESKTOP_DIR" "$INSTALL_DIR" "$icon_dir" "$applications_dir"
-  install -m 0755 "$TEMPORARY/$asset" "$executable"
+  install -m 0755 "$TEMPORARY/$asset" "$staged"
+  mv -f "$staged" "$executable"
   install -m 0644 "$TEMPORARY/$icon_asset" "$icon_dir/axiomio.png"
   ln -sfn "$executable" "$INSTALL_DIR/axiomio"
   cat > "$applications_dir/axiomio.desktop" <<EOF
@@ -124,6 +144,7 @@ install_macos() {
   local asset="axiomio-macos-${arch}.app.tar.gz"
   local app="$APPLICATIONS_DIR/AxiomIO.app"
   local staged="$APPLICATIONS_DIR/.AxiomIO.app.new.$$"
+  local previous="$APPLICATIONS_DIR/.AxiomIO.app.old.$$"
   local executable
 
   echo "Downloading $asset"
@@ -137,8 +158,20 @@ install_macos() {
 
   rm -rf "$staged"
   mv "$TEMPORARY/extracted/AxiomIO.app" "$staged"
-  rm -rf "$app"
-  mv "$staged" "$app"
+  if [[ -e "$app" ]]; then
+    rm -rf "$previous"
+    mv "$app" "$previous"
+    ROLLBACK_APP="$previous"
+    ROLLBACK_TARGET="$app"
+  fi
+  if ! mv "$staged" "$app"; then
+    fail "could not replace $app"
+  fi
+  if [[ -n "$ROLLBACK_APP" ]]; then
+    rm -rf "$ROLLBACK_APP"
+    ROLLBACK_APP=""
+    ROLLBACK_TARGET=""
+  fi
   ln -sfn "$app/Contents/MacOS/axiomio" "$INSTALL_DIR/axiomio"
 }
 
@@ -147,7 +180,7 @@ main() {
   os="$(detect_os)"
   arch="$(detect_arch)"
   base="$(release_base)"
-  TEMPORARY="$(mktemp -d "${TMPDIR:-/tmp}/axiomio-install.XXXXXX")"
+  TEMPORARY="$(mktemp -d "${TMPDIR:-/tmp}/axiomup.XXXXXX")"
   trap cleanup EXIT
   download "$base/SHA256SUMS" "$TEMPORARY/SHA256SUMS"
 
@@ -163,7 +196,8 @@ main() {
     *) fail "unsupported operating system: $os" ;;
   esac
 
-  echo "Installed AxiomIO desktop application"
+  migrate_legacy_install
+  echo "AxiomIO desktop application is up to date"
   if command -v opencode >/dev/null 2>&1; then
     echo "Configuring OpenCode"
     "$executable" configure opencode

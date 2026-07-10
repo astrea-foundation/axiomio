@@ -4,6 +4,7 @@ param(
     [string]$DownloadBase = $env:AXIOM_DOWNLOAD_BASE,
     [string]$Repository = $env:AXIOM_REPOSITORY,
     [string]$DesktopInstallDir = $env:AXIOM_DESKTOP_INSTALL_DIR,
+    [string]$LegacyInstallDir = $env:AXIOM_INSTALL_DIR,
     [switch]$SkipPathUpdate,
     [switch]$SkipOpenCode,
     [switch]$SkipDesktopInstall
@@ -16,6 +17,19 @@ if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "latest" }
 if ([string]::IsNullOrWhiteSpace($Repository)) { $Repository = "astrea-foundation/axiomio" }
 if ([string]::IsNullOrWhiteSpace($DesktopInstallDir)) {
     $DesktopInstallDir = Join-Path $env:LOCALAPPDATA "AxiomIO"
+}
+if ([string]::IsNullOrWhiteSpace($LegacyInstallDir)) {
+    $LegacyInstallDir = Join-Path $HOME ".local\bin"
+}
+
+function Remove-LegacyAxiomInstall {
+    $legacyCli = Join-Path $LegacyInstallDir "axiom.exe"
+    $legacyProxy = Join-Path $LegacyInstallDir "axiom-proxy-headless.exe"
+    if ((Test-Path -LiteralPath $legacyCli -PathType Leaf) -and
+        (Test-Path -LiteralPath $legacyProxy -PathType Leaf)) {
+        Remove-Item -LiteralPath $legacyCli, $legacyProxy -Force
+        Write-Host "Removed the legacy two-binary AxiomIO installation"
+    }
 }
 
 function Get-AxiomArchitecture {
@@ -44,7 +58,7 @@ function Get-ReleaseBase {
 $architecture = Get-AxiomArchitecture
 $asset = "axiomio-windows-$architecture-setup.exe"
 $base = Get-ReleaseBase
-$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("axiomio-install-" + [guid]::NewGuid())
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("axiomup-" + [guid]::NewGuid())
 
 try {
     New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
@@ -92,7 +106,8 @@ try {
         }
     }
 
-    Write-Host "Installed AxiomIO desktop application to $DesktopInstallDir"
+    Remove-LegacyAxiomInstall
+    Write-Host "AxiomIO desktop application is up to date at $DesktopInstallDir"
     if ($SkipOpenCode) {
         Write-Host "Skipping OpenCode configuration by request"
     } elseif ($null -ne (Get-Command opencode -ErrorAction SilentlyContinue)) {
