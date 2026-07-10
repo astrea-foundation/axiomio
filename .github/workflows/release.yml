@@ -21,31 +21,43 @@ jobs:
             os: linux
             arch: x86_64
             bundles: appimage
+            build_args: --bundles appimage
+            bundle_root: target/release/bundle
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             os: linux
             arch: aarch64
             bundles: appimage
+            build_args: --bundles appimage
+            bundle_root: target/release/bundle
           - runner: macos-14
             target: aarch64-apple-darwin
             os: macos
             arch: aarch64
             bundles: app,dmg
+            build_args: --target aarch64-apple-darwin --bundles app,dmg
+            bundle_root: target/aarch64-apple-darwin/release/bundle
           - runner: macos-14
             target: x86_64-apple-darwin
             os: macos
             arch: x86_64
             bundles: app,dmg
+            build_args: --target x86_64-apple-darwin --bundles app,dmg
+            bundle_root: target/x86_64-apple-darwin/release/bundle
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             os: windows
             arch: x86_64
             bundles: nsis
+            build_args: --target x86_64-pc-windows-msvc --bundles nsis
+            bundle_root: target/x86_64-pc-windows-msvc/release/bundle
           - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             os: windows
             arch: aarch64
             bundles: nsis
+            build_args: --target aarch64-pc-windows-msvc --bundles nsis
+            bundle_root: target/aarch64-pc-windows-msvc/release/bundle
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -137,14 +149,14 @@ jobs:
           NO_STRIP: "1"
         with:
           projectPath: .
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: ${{ matrix.build_args }}
 
       - name: Normalize Linux artifact
         if: matrix.os == 'linux'
         shell: bash
         run: |
           mkdir -p dist
-          source="$(find "target/${{ matrix.target }}/release/bundle/appimage" -type f -name '*.AppImage' -print -quit)"
+          source="$(find "${{ matrix.bundle_root }}/appimage" -type f -name '*.AppImage' -print -quit)"
           test -n "$source"
           cp "$source" "dist/axiomio-linux-${{ matrix.arch }}.AppImage"
 
@@ -153,8 +165,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          app="$(find "target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          dmg="$(find "target/${{ matrix.target }}/release/bundle/dmg" -type f -name '*.dmg' -print -quit)"
+          app="$(find "${{ matrix.bundle_root }}/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          dmg="$(find "${{ matrix.bundle_root }}/dmg" -type f -name '*.dmg' -print -quit)"
           test -n "$app"
           test -n "$dmg"
           tar -czf "dist/axiomio-macos-${{ matrix.arch }}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
@@ -165,7 +177,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $setup = Get-ChildItem "target/${{ matrix.target }}/release/bundle/nsis" -Filter "*-setup.exe" |
+          $setup = Get-ChildItem "${{ matrix.bundle_root }}/nsis" -Filter "*-setup.exe" |
             Select-Object -First 1
           if ($null -eq $setup) { throw "Tauri did not produce an NSIS setup executable" }
           Copy-Item $setup.FullName "dist/axiomio-windows-${{ matrix.arch }}-setup.exe"
