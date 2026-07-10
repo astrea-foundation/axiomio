@@ -161,8 +161,18 @@ test_rejects_tampered_artifact() {
   [[ -e "$bin_dir/axiom-proxy-headless" ]]
 }
 
+test_rejects_linux_arm() {
+  local output
+  if output="$(AXIOM_OS=linux AXIOM_ARCH=aarch64 bash "$INSTALLER" 2>&1)"; then
+    echo "Linux ARM installation unexpectedly succeeded" >&2
+    return 1
+  fi
+  grep -Fq 'Linux desktop installation currently supports x86_64 only' <<<"$output"
+}
+
 bash -n "$INSTALLER"
 test_linux_desktop_install_and_setup
 test_macos_app_install
 test_rejects_tampered_artifact
+test_rejects_linux_arm
 echo "Unix installer tests passed"

@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 assets=(
-  axiomio-linux-aarch64.AppImage
   axiomio-linux-x86_64.AppImage
   axiomio-macos-aarch64.app.tar.gz
   axiomio-macos-aarch64.dmg
@@ -23,6 +22,8 @@ rg -Fq 'axiomio-macos-${{ matrix.arch }}.app.tar.gz' "$ROOT/.github/workflows/re
 rg -Fq 'axiomio-macos-${{ matrix.arch }}.dmg' "$ROOT/.github/workflows/release.yml"
 rg -Fq 'axiomio-windows-${{ matrix.arch }}-setup.exe' "$ROOT/.github/workflows/release.yml"
 rg -Fq 'axiomio-linux-${arch}.AppImage' "$ROOT/install/axiomup.sh"
+rg -Fq 'Linux desktop installation currently supports x86_64 only' \
+  "$ROOT/install/axiomup.sh" "$ROOT/install/README.md"
 rg -Fq 'axiomio-macos-${arch}.app.tar.gz' "$ROOT/install/axiomup.sh"
 rg -Fq 'axiomio-windows-$architecture-setup.exe' "$ROOT/install/axiomup.ps1"
 rg -Fq 'astrea-foundation/axiomio' "$ROOT/install/axiomup.sh" "$ROOT/install/axiomup.ps1"

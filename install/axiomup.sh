@@ -180,6 +180,9 @@ main() {
   os="$(detect_os)"
   arch="$(detect_arch)"
   base="$(release_base)"
+  if [[ "$os" == "linux" && "$arch" != "x86_64" ]]; then
+    fail "Linux desktop installation currently supports x86_64 only"
+  fi
   TEMPORARY="$(mktemp -d "${TMPDIR:-/tmp}/axiomup.XXXXXX")"
   trap cleanup EXIT
   download "$base/SHA256SUMS" "$TEMPORARY/SHA256SUMS"

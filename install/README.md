@@ -18,7 +18,8 @@ before installation.
 curl -fsSL https://axiom.stream/axiomup.sh | bash
 ```
 
-The script atomically replaces the AppImage under `~/.local/share/axiomio`,
+Linux desktop installation currently supports x86_64. The script atomically
+replaces the AppImage under `~/.local/share/axiomio`,
 creates an `axiomio` symlink in `~/.local/bin`, and installs a desktop entry and
 icon under `~/.local/share`. Override these locations with `AXIOM_DESKTOP_DIR`,
 `AXIOM_INSTALL_DIR`, `AXIOM_DESKTOP_ENTRY_DIR`, and `AXIOM_ICON_DIR`.
@@ -97,7 +98,6 @@ Release asset names are stable:
 
 ```text
 axiomio-linux-x86_64.AppImage
-axiomio-linux-aarch64.AppImage
 axiomio-macos-aarch64.app.tar.gz
 axiomio-macos-aarch64.dmg
 axiomio-macos-x86_64.app.tar.gz
