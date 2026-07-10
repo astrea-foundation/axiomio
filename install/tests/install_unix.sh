@@ -3,96 +3,124 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INSTALLER="$ROOT/install/install.sh"
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/axiom-installer-test.XXXXXX")"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/axiomio-installer-test.XXXXXX")"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-make_release() {
+write_checksums() {
   local release_dir="$1"
-  local payload_dir="$release_dir/payload"
-  mkdir -p "$payload_dir"
-  cat > "$payload_dir/axiom" <<'SCRIPT'
+  (cd "$release_dir" && sha256sum axiomio-* > SHA256SUMS)
+}
+
+make_linux_release() {
+  local release_dir="$1"
+  mkdir -p "$release_dir"
+  cat > "$release_dir/axiomio-linux-x86_64.AppImage" <<'SCRIPT'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$AXIOM_TEST_LOG"
 SCRIPT
-  cat > "$payload_dir/axiom-proxy-headless" <<'SCRIPT'
-#!/usr/bin/env bash
-echo proxy
-SCRIPT
-  chmod +x "$payload_dir/axiom" "$payload_dir/axiom-proxy-headless"
-  tar -czf "$release_dir/axiom-proxy-linux-x86_64.tar.gz" -C "$payload_dir" \
-    axiom axiom-proxy-headless
-  (
-    cd "$release_dir"
-    sha256sum axiom-proxy-linux-x86_64.tar.gz > SHA256SUMS
-  )
+  chmod +x "$release_dir/axiomio-linux-x86_64.AppImage"
+  printf 'fake icon\n' > "$release_dir/axiomio-icon.png"
+  write_checksums "$release_dir"
 }
 
-test_install_and_opencode_setup() {
-  local case_dir="$TEST_ROOT/success"
-  local release_dir="$case_dir/release"
-  local install_dir="$case_dir/bin"
-  local fake_path="$case_dir/path"
-  local log="$case_dir/axiom.log"
-  mkdir -p "$release_dir" "$fake_path"
-  make_release "$release_dir"
-  cat > "$fake_path/opencode" <<'SCRIPT'
+make_macos_release() {
+  local release_dir="$1"
+  local app="$release_dir/payload/AxiomIO.app/Contents/MacOS"
+  mkdir -p "$app"
+  cat > "$app/axiomio" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AXIOM_TEST_LOG"
+SCRIPT
+  chmod +x "$app/axiomio"
+  tar -czf "$release_dir/axiomio-macos-aarch64.app.tar.gz" \
+    -C "$release_dir/payload" AxiomIO.app
+  rm -rf "$release_dir/payload"
+  write_checksums "$release_dir"
+}
+
+make_fake_opencode() {
+  local directory="$1"
+  mkdir -p "$directory"
+  cat > "$directory/opencode" <<'SCRIPT'
 #!/usr/bin/env bash
 exit 0
 SCRIPT
-  chmod +x "$fake_path/opencode"
+  chmod +x "$directory/opencode"
+}
+
+test_linux_desktop_install_and_setup() {
+  local case_dir="$TEST_ROOT/linux"
+  local release_dir="$case_dir/release"
+  local bin_dir="$case_dir/bin"
+  local desktop_dir="$case_dir/desktop"
+  local fake_path="$case_dir/path"
+  local log="$case_dir/axiomio.log"
+  make_linux_release "$release_dir"
+  make_fake_opencode "$fake_path"
 
   AXIOM_OS=linux \
   AXIOM_ARCH=x86_64 \
-  AXIOM_INSTALL_DIR="$install_dir" \
+  AXIOM_INSTALL_DIR="$bin_dir" \
+  AXIOM_DESKTOP_DIR="$desktop_dir" \
+  AXIOM_ICON_DIR="$case_dir/icons" \
+  AXIOM_DESKTOP_ENTRY_DIR="$case_dir/applications" \
   AXIOM_DOWNLOAD_BASE="file://$release_dir" \
   AXIOM_TEST_LOG="$log" \
   PATH="$fake_path:/usr/bin:/bin" \
     bash "$INSTALLER"
 
-  [[ -x "$install_dir/axiom" ]]
-  [[ -x "$install_dir/axiom-proxy-headless" ]]
+  [[ -x "$desktop_dir/AxiomIO.AppImage" ]]
+  [[ -L "$bin_dir/axiomio" ]]
+  [[ -f "$case_dir/applications/axiomio.desktop" ]]
+  [[ -f "$case_dir/icons/axiomio.png" ]]
   [[ "$(cat "$log")" == "configure opencode" ]]
 }
 
-test_skips_missing_opencode() {
-  local case_dir="$TEST_ROOT/no-opencode"
+test_macos_app_install() {
+  local case_dir="$TEST_ROOT/macos"
   local release_dir="$case_dir/release"
-  local install_dir="$case_dir/bin"
-  mkdir -p "$release_dir"
-  make_release "$release_dir"
-  local output
-  output="$(
-    AXIOM_OS=linux \
-    AXIOM_ARCH=x86_64 \
-    AXIOM_INSTALL_DIR="$install_dir" \
-    AXIOM_DOWNLOAD_BASE="file://$release_dir" \
-    PATH="/usr/bin:/bin" \
-      bash "$INSTALLER"
-  )"
-  [[ "$output" == *"OpenCode was not found"* ]]
+  local bin_dir="$case_dir/bin"
+  local applications_dir="$case_dir/Applications"
+  local fake_path="$case_dir/path"
+  local log="$case_dir/axiomio.log"
+  make_macos_release "$release_dir"
+  make_fake_opencode "$fake_path"
+
+  AXIOM_OS=macos \
+  AXIOM_ARCH=aarch64 \
+  AXIOM_INSTALL_DIR="$bin_dir" \
+  AXIOM_APPLICATIONS_DIR="$applications_dir" \
+  AXIOM_DOWNLOAD_BASE="file://$release_dir" \
+  AXIOM_TEST_LOG="$log" \
+  PATH="$fake_path:/usr/bin:/bin" \
+    bash "$INSTALLER"
+
+  [[ -x "$applications_dir/AxiomIO.app/Contents/MacOS/axiomio" ]]
+  [[ -L "$bin_dir/axiomio" ]]
+  [[ "$(cat "$log")" == "configure opencode" ]]
 }
 
-test_rejects_tampered_archive() {
+test_rejects_tampered_artifact() {
   local case_dir="$TEST_ROOT/tampered"
   local release_dir="$case_dir/release"
-  local install_dir="$case_dir/bin"
-  mkdir -p "$release_dir"
-  make_release "$release_dir"
-  printf 'tampered' >> "$release_dir/axiom-proxy-linux-x86_64.tar.gz"
+  local bin_dir="$case_dir/bin"
+  make_linux_release "$release_dir"
+  printf 'tampered' >> "$release_dir/axiomio-linux-x86_64.AppImage"
   if AXIOM_OS=linux \
     AXIOM_ARCH=x86_64 \
-    AXIOM_INSTALL_DIR="$install_dir" \
+    AXIOM_INSTALL_DIR="$bin_dir" \
+    AXIOM_DESKTOP_DIR="$case_dir/desktop" \
     AXIOM_DOWNLOAD_BASE="file://$release_dir" \
     PATH="/usr/bin:/bin" \
       bash "$INSTALLER" >/dev/null 2>&1; then
-    echo "tampered archive was accepted" >&2
+    echo "tampered desktop artifact was accepted" >&2
     return 1
   fi
-  [[ ! -e "$install_dir/axiom" ]]
+  [[ ! -e "$bin_dir/axiomio" ]]
 }
 
 bash -n "$INSTALLER"
-test_install_and_opencode_setup
-test_skips_missing_opencode
-test_rejects_tampered_archive
+test_linux_desktop_install_and_setup
+test_macos_app_install
+test_rejects_tampered_artifact
 echo "Unix installer tests passed"

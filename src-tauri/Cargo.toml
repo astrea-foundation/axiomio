@@ -1,10 +1,14 @@
 [package]
-name = "axiom-proxy"
+name = "axiomio"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "AxiomIO — OpenAI-compatible local adapter with TEE-attested E2EE"
+
+[[bin]]
+name = "axiomio"
+path = "src/main.rs"
 
 [lib]
 name = "axiom_proxy_lib"
@@ -28,6 +32,16 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [features]
 # Tauri's default; kept explicit for clarity.

@@ -1,6 +1,6 @@
 //! Persistent proxy configuration. Stored as JSON at the platform config dir via `directories`
 //! (Linux: ~/.config/axiom-proxy, macOS: ~/Library/Application Support, Windows: %APPDATA%),
-//! so behavior is identical for the Tauri app and the headless binary. The API key is NEVER here
+//! so behavior is identical for the desktop app and `--headless` mode. The API key is NEVER here
 //! — it lives in the OS keyring.
 
 use std::path::{Path, PathBuf};

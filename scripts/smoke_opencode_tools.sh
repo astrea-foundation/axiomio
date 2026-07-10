@@ -23,7 +23,7 @@ unset AXIOM_PROXY_API_KEY AXIOM_PROXY_BACKEND
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 proxy_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
-proxy_bin="${AXIOM_PROXY_BIN:-$proxy_root/target/debug/axiom-proxy-headless}"
+proxy_bin="${AXIOM_PROXY_BIN:-$proxy_root/target/debug/axiomio}"
 port="${AXIOM_PROXY_PORT:-18484}"
 requested_model="${AXIOM_OPENCODE_MODEL:-}"
 reasoning_effort="${AXIOM_OPENCODE_REASONING_EFFORT:-high}"
@@ -41,8 +41,7 @@ keep_artifacts="${KEEP_SMOKE_ARTIFACTS:-0}"
 if [[ ! -x "$proxy_bin" ]]; then
   command -v cargo >/dev/null 2>&1 \
     || fail "proxy binary not found; set AXIOM_PROXY_BIN or install cargo"
-  cargo build --manifest-path "$proxy_root/Cargo.toml" \
-    -p axiom-server --bin axiom-proxy-headless
+  cargo build --manifest-path "$proxy_root/Cargo.toml" -p axiomio
 fi
 
 if curl --silent --show-error --max-time 1 \
@@ -88,7 +87,7 @@ printf 'TOKEN=after\n' >"$artifact_root/expected.txt"
 AXIOM_PROXY_API_KEY="$relay_api_key" \
 AXIOM_PROXY_BACKEND="$backend" \
 AXIOM_PROXY_PORT="$port" \
-  "$proxy_bin" >"$proxy_log" 2>&1 &
+  "$proxy_bin" --headless >"$proxy_log" 2>&1 &
 proxy_pid=$!
 
 ready=0

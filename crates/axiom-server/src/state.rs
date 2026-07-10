@@ -1,5 +1,5 @@
 //! Shared proxy state: config snapshot, API key, relay client, attestation cache, and live
-//! status/counters. Tauri-free so the headless binary and tests use it directly.
+//! status/counters. Tauri-free so `--headless` mode and tests use it directly.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -9,14 +9,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::{bind, serve, ProxyCore};
 use axiom_core::config::Config;
 use axiom_core::relay::HttpRelay;
-use axiom_server::{bind, serve, ProxyCore};
 use tokio_util::sync::CancellationToken;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_env_filter("info").init();
+pub async fn run() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     let mut config = Config::default();
     if let Ok(backend) = std::env::var("AXIOM_PROXY_BACKEND") {

@@ -1,9 +1,9 @@
-name: proxy release
+name: desktop release
 
 on:
   push:
     tags:
-      - "proxy-v*"
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -11,38 +11,51 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.asset }}
+    name: ${{ matrix.os }}-${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            asset: axiom-proxy-linux-x86_64.tar.gz
-            os: unix
+            os: linux
+            arch: x86_64
+            bundles: appimage
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-            asset: axiom-proxy-linux-aarch64.tar.gz
-            os: unix
+            os: linux
+            arch: aarch64
+            bundles: appimage
           - runner: macos-14
             target: aarch64-apple-darwin
-            asset: axiom-proxy-macos-aarch64.tar.gz
-            os: unix
+            os: macos
+            arch: aarch64
+            bundles: app,dmg
           - runner: macos-14
             target: x86_64-apple-darwin
-            asset: axiom-proxy-macos-x86_64.tar.gz
-            os: unix
+            os: macos
+            arch: x86_64
+            bundles: app,dmg
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
-            asset: axiom-proxy-windows-x86_64.zip
             os: windows
+            arch: x86_64
+            bundles: nsis
           - runner: windows-11-arm
             target: aarch64-pc-windows-msvc
-            asset: axiom-proxy-windows-aarch64.zip
             os: windows
+            arch: aarch64
+            bundles: nsis
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev build-essential curl wget file
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,64 +63,146 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            .
-            cli
+          workspaces: .
 
-      - name: Build headless proxy
-        run: cargo build --locked --release -p axiom-server --bin axiom-proxy-headless --target ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Build Axiom setup helper
-        working-directory: cli
-        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Install UI dependencies
+        run: npm --prefix ui ci
 
-      - name: Package Unix archive
-        if: matrix.os == 'unix'
+      - name: Configure macOS signing
+        if: matrix.os == 'macos'
+        shell: bash
+        env:
+          MACOS_SIGNING_MODE: ${{ vars.MACOS_SIGNING_MODE || 'adhoc' }}
+          APPLE_CERTIFICATE_SECRET: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_SECRET: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          case "$MACOS_SIGNING_MODE" in
+            adhoc|"")
+              echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+              ;;
+            developer-id)
+              for name in \
+                APPLE_CERTIFICATE_SECRET \
+                APPLE_CERTIFICATE_PASSWORD_SECRET \
+                APPLE_SIGNING_IDENTITY_SECRET \
+                APPLE_ID_SECRET \
+                APPLE_PASSWORD_SECRET \
+                APPLE_TEAM_ID_SECRET
+              do
+                if [ -z "${!name}" ]; then
+                  echo "::error::$name is required when MACOS_SIGNING_MODE=developer-id"
+                  exit 1
+                fi
+              done
+              {
+                echo "APPLE_CERTIFICATE<<__APPLE_CERTIFICATE__"
+                echo "$APPLE_CERTIFICATE_SECRET"
+                echo "__APPLE_CERTIFICATE__"
+                echo "APPLE_CERTIFICATE_PASSWORD<<__APPLE_CERTIFICATE_PASSWORD__"
+                echo "$APPLE_CERTIFICATE_PASSWORD_SECRET"
+                echo "__APPLE_CERTIFICATE_PASSWORD__"
+                echo "APPLE_SIGNING_IDENTITY<<__APPLE_SIGNING_IDENTITY__"
+                echo "$APPLE_SIGNING_IDENTITY_SECRET"
+                echo "__APPLE_SIGNING_IDENTITY__"
+                echo "APPLE_ID<<__APPLE_ID__"
+                echo "$APPLE_ID_SECRET"
+                echo "__APPLE_ID__"
+                echo "APPLE_PASSWORD<<__APPLE_PASSWORD__"
+                echo "$APPLE_PASSWORD_SECRET"
+                echo "__APPLE_PASSWORD__"
+                echo "APPLE_TEAM_ID<<__APPLE_TEAM_ID__"
+                echo "$APPLE_TEAM_ID_SECRET"
+                echo "__APPLE_TEAM_ID__"
+              } >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::MACOS_SIGNING_MODE must be 'adhoc' or 'developer-id'"
+              exit 1
+              ;;
+          esac
+
+      - name: Build desktop application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # linuxdeploy's bundled strip is older than some host ELF formats.
+          # The Rust release binary is already stripped by Cargo's release profile.
+          NO_STRIP: "1"
+        with:
+          projectPath: .
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Normalize Linux artifact
+        if: matrix.os == 'linux'
         shell: bash
         run: |
-          mkdir -p dist/package
-          cp "cli/target/${{ matrix.target }}/release/axiom" dist/package/axiom
-          cp "target/${{ matrix.target }}/release/axiom-proxy-headless" dist/package/axiom-proxy-headless
-          tar -czf "dist/${{ matrix.asset }}" -C dist/package axiom axiom-proxy-headless
+          mkdir -p dist
+          source="$(find "target/${{ matrix.target }}/release/bundle/appimage" -type f -name '*.AppImage' -print -quit)"
+          test -n "$source"
+          cp "$source" "dist/axiomio-linux-${{ matrix.arch }}.AppImage"
 
-      - name: Package Windows archive
+      - name: Normalize macOS artifacts
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          mkdir -p dist
+          app="$(find "target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          dmg="$(find "target/${{ matrix.target }}/release/bundle/dmg" -type f -name '*.dmg' -print -quit)"
+          test -n "$app"
+          test -n "$dmg"
+          tar -czf "dist/axiomio-macos-${{ matrix.arch }}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+          cp "$dmg" "dist/axiomio-macos-${{ matrix.arch }}.dmg"
+
+      - name: Normalize Windows artifact
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
-          Copy-Item "cli/target/${{ matrix.target }}/release/axiom.exe" "dist/package/axiom.exe"
-          Copy-Item "target/${{ matrix.target }}/release/axiom-proxy-headless.exe" "dist/package/axiom-proxy-headless.exe"
-          Compress-Archive -Path "dist/package/axiom.exe", "dist/package/axiom-proxy-headless.exe" -DestinationPath "dist/${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $setup = Get-ChildItem "target/${{ matrix.target }}/release/bundle/nsis" -Filter "*-setup.exe" |
+            Select-Object -First 1
+          if ($null -eq $setup) { throw "Tauri did not produce an NSIS setup executable" }
+          Copy-Item $setup.FullName "dist/axiomio-windows-${{ matrix.arch }}-setup.exe"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          name: axiomio-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/axiomio-*
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/proxy-v')
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Generate checksums
-        working-directory: dist
-        run: sha256sum axiom-proxy-* > SHA256SUMS
+      - name: Add application icon and checksums
+        run: |
+          cp src-tauri/icons/128x128.png dist/axiomio-icon.png
+          cd dist
+          sha256sum axiomio-* > SHA256SUMS
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "${{ github.ref_name }}"
-          dist/axiom-proxy-*
+          dist/axiomio-*
           dist/SHA256SUMS
           --verify-tag
           --generate-notes
-          --title "Axiom Proxy ${{ github.ref_name }}"
+          --title "AxiomIO ${{ github.ref_name }}"

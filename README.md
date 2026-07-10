@@ -5,18 +5,17 @@ to Axiom models. Point `OPENAI_BASE_URL` at `http://127.0.0.1:8484/v1` and set y
 the proxy verifies the model TEE attestation on your machine and encrypts prompts to the attested
 key, so plaintext and verification never leave your device.
 
-This repository contains the complete proxy, desktop shell, setup helper,
-installers, and release automation. The hosted Axiom service and its private
-backend are maintained separately.
+This repository contains the complete proxy, desktop application, coding-agent
+setup, installers, and release automation. The hosted Axiom service and its
+private backend are maintained separately.
 
 ## Layout
 
 ```text
 crates/axiom-core     E2EE + attestation verification + relay client (pure Rust, no Tauri)
-crates/axiom-server   axum OpenAI-compatible HTTP surface + headless binary
-src-tauri             Tauri v2 desktop app (tray, autostart, keyring)
+crates/axiom-server   axum HTTP surface + headless and agent-setup logic
+src-tauri             `axiomio` executable: desktop, --headless, and configuration
 ui                    React + Vite + Tailwind dashboard
-cli                   `axiom` coding-agent setup helper
 install               Linux, macOS, and Windows bootstrap installers
 fixtures              committed cross-language E2EE protocol vectors
 ```
@@ -31,7 +30,7 @@ cargo test -p axiom-core -p axiom-server
 
 ```bash
 AXIOM_PROXY_API_KEY=axm_... AXIOM_PROXY_BACKEND=https://api.axiom.stream \
-  cargo run -p axiom-server --bin axiom-proxy-headless
+  cargo run -p axiomio -- --headless
 # then: OPENAI_BASE_URL=http://127.0.0.1:8484/v1 OPENAI_API_KEY=unused <your tool>
 ```
 
@@ -49,9 +48,10 @@ Windows PowerShell:
 irm https://axiom.stream/install.ps1 | iex
 ```
 
-The branded scripts install checksummed binaries from this repository's public
-GitHub Releases. See [`install/README.md`](install/README.md) for version pinning,
-mirrors, and manual startup details.
+The branded scripts install the checksummed desktop application from this
+repository's public GitHub Releases and expose its executable as `axiomio` on
+`PATH`. See [`install/README.md`](install/README.md) for version pinning,
+mirrors, native artifact details, and headless startup.
 
 ## OpenCode tool calling (proxy only)
 
@@ -67,7 +67,7 @@ Start the proxy with the real relay credential only in the proxy environment:
 
 ```bash
 AXIOM_PROXY_API_KEY=axm_... AXIOM_PROXY_BACKEND=https://api.axiom.stream \
-  cargo run -p axiom-server --bin axiom-proxy-headless
+  axiomio --headless
 ```
 
 An isolated OpenCode configuration can then point at the local endpoint. The

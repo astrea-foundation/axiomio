@@ -1,8 +1,11 @@
 //! axiom-server: the local OpenAI-compatible HTTP surface. Depends on axiom-core; no Tauri.
 
 mod audit;
+pub mod command;
 pub mod handlers;
+mod headless;
 mod history;
+mod opencode;
 pub mod sse;
 pub mod state;
 
@@ -14,6 +17,7 @@ use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 
+pub use headless::run as run_headless;
 pub use state::ProxyCore;
 
 pub fn build_router(core: Arc<ProxyCore>) -> Router {

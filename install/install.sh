@@ -4,10 +4,12 @@ set -euo pipefail
 REPOSITORY="${AXIOM_REPOSITORY:-astrea-foundation/axiomio}"
 VERSION="${AXIOM_VERSION:-latest}"
 INSTALL_DIR="${AXIOM_INSTALL_DIR:-$HOME/.local/bin}"
+DESKTOP_DIR="${AXIOM_DESKTOP_DIR:-$HOME/.local/share/axiomio}"
+APPLICATIONS_DIR="${AXIOM_APPLICATIONS_DIR:-$HOME/Applications}"
 TEMPORARY=""
 
 fail() {
-  echo "axiom installer: $*" >&2
+  echo "axiomio installer: $*" >&2
   exit 1
 }
 
@@ -70,12 +72,14 @@ sha256_file() {
   fi
 }
 
-install_binary() {
-  local source="$1"
-  local destination="$2"
-  local temporary="${destination}.tmp.$$"
-  install -m 0755 "$source" "$temporary"
-  mv -f "$temporary" "$destination"
+verify_download() {
+  local path="$1"
+  local asset="$2"
+  local expected actual
+  expected="$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset { print $1; exit }' "$TEMPORARY/SHA256SUMS")"
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "SHA256SUMS has no valid entry for $asset"
+  actual="$(sha256_file "$path")"
+  [[ "$actual" == "$expected" ]] || fail "checksum mismatch for $asset"
 }
 
 cleanup() {
@@ -84,46 +88,92 @@ cleanup() {
   fi
 }
 
-main() {
-  local os arch asset base temporary expected actual
-  os="$(detect_os)"
-  arch="$(detect_arch)"
-  asset="axiom-proxy-${os}-${arch}.tar.gz"
-  base="$(release_base)"
-  temporary="$(mktemp -d "${TMPDIR:-/tmp}/axiom-install.XXXXXX")"
-  TEMPORARY="$temporary"
-  trap cleanup EXIT
+install_linux() {
+  local base="$1"
+  local arch="$2"
+  local asset="axiomio-linux-${arch}.AppImage"
+  local icon_asset="axiomio-icon.png"
+  local executable="$DESKTOP_DIR/AxiomIO.AppImage"
+  local icon_dir="${AXIOM_ICON_DIR:-$HOME/.local/share/icons/hicolor/128x128/apps}"
+  local applications_dir="${AXIOM_DESKTOP_ENTRY_DIR:-$HOME/.local/share/applications}"
 
   echo "Downloading $asset"
-  download "$base/$asset" "$temporary/$asset"
-  download "$base/SHA256SUMS" "$temporary/SHA256SUMS"
+  download "$base/$asset" "$TEMPORARY/$asset"
+  download "$base/$icon_asset" "$TEMPORARY/$icon_asset"
+  verify_download "$TEMPORARY/$asset" "$asset"
+  verify_download "$TEMPORARY/$icon_asset" "$icon_asset"
 
-  expected="$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset { print $1; exit }' "$temporary/SHA256SUMS")"
-  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "SHA256SUMS has no valid entry for $asset"
-  actual="$(sha256_file "$temporary/$asset")"
-  [[ "$actual" == "$expected" ]] || fail "checksum mismatch for $asset"
+  mkdir -p "$DESKTOP_DIR" "$INSTALL_DIR" "$icon_dir" "$applications_dir"
+  install -m 0755 "$TEMPORARY/$asset" "$executable"
+  install -m 0644 "$TEMPORARY/$icon_asset" "$icon_dir/axiomio.png"
+  ln -sfn "$executable" "$INSTALL_DIR/axiomio"
+  cat > "$applications_dir/axiomio.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AxiomIO
+Exec="$executable"
+Icon=$icon_dir/axiomio.png
+Terminal=false
+Categories=Development;
+EOF
+}
 
-  mkdir "$temporary/extracted"
-  tar -xzf "$temporary/$asset" -C "$temporary/extracted"
-  [[ -f "$temporary/extracted/axiom" ]] || fail "$asset does not contain axiom"
-  [[ -f "$temporary/extracted/axiom-proxy-headless" ]] || \
-    fail "$asset does not contain axiom-proxy-headless"
+install_macos() {
+  local base="$1"
+  local arch="$2"
+  local asset="axiomio-macos-${arch}.app.tar.gz"
+  local app="$APPLICATIONS_DIR/AxiomIO.app"
+  local staged="$APPLICATIONS_DIR/.AxiomIO.app.new.$$"
+  local executable
 
-  mkdir -p "$INSTALL_DIR"
-  install_binary "$temporary/extracted/axiom" "$INSTALL_DIR/axiom"
-  install_binary "$temporary/extracted/axiom-proxy-headless" "$INSTALL_DIR/axiom-proxy-headless"
+  echo "Downloading $asset"
+  download "$base/$asset" "$TEMPORARY/$asset"
+  verify_download "$TEMPORARY/$asset" "$asset"
+  mkdir -p "$TEMPORARY/extracted" "$APPLICATIONS_DIR" "$INSTALL_DIR"
+  tar -xzf "$TEMPORARY/$asset" -C "$TEMPORARY/extracted"
+  [[ -d "$TEMPORARY/extracted/AxiomIO.app" ]] || fail "$asset does not contain AxiomIO.app"
+  executable="$TEMPORARY/extracted/AxiomIO.app/Contents/MacOS/axiomio"
+  [[ -x "$executable" ]] || fail "$asset does not contain the axiomio executable"
 
-  echo "Installed Axiom proxy tools to $INSTALL_DIR"
+  rm -rf "$staged"
+  mv "$TEMPORARY/extracted/AxiomIO.app" "$staged"
+  rm -rf "$app"
+  mv "$staged" "$app"
+  ln -sfn "$app/Contents/MacOS/axiomio" "$INSTALL_DIR/axiomio"
+}
+
+main() {
+  local os arch base executable
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+  base="$(release_base)"
+  TEMPORARY="$(mktemp -d "${TMPDIR:-/tmp}/axiomio-install.XXXXXX")"
+  trap cleanup EXIT
+  download "$base/SHA256SUMS" "$TEMPORARY/SHA256SUMS"
+
+  case "$os" in
+    linux)
+      install_linux "$base" "$arch"
+      executable="$DESKTOP_DIR/AxiomIO.AppImage"
+      ;;
+    macos)
+      install_macos "$base" "$arch"
+      executable="$APPLICATIONS_DIR/AxiomIO.app/Contents/MacOS/axiomio"
+      ;;
+    *) fail "unsupported operating system: $os" ;;
+  esac
+
+  echo "Installed AxiomIO desktop application"
   if command -v opencode >/dev/null 2>&1; then
     echo "Configuring OpenCode"
-    "$INSTALL_DIR/axiom" configure opencode
+    "$executable" configure opencode
   else
     echo "OpenCode was not found; skipping OpenCode configuration"
   fi
 
   case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
-    *) echo "Add $INSTALL_DIR to PATH to use axiom and axiom-proxy-headless" ;;
+    *) echo "Add $INSTALL_DIR to PATH to use axiomio" ;;
   esac
 }
 

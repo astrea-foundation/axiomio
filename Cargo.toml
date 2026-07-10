@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/axiom-core", "crates/axiom-server", "src-tauri"]
-exclude = ["cli"]
 
 [workspace.package]
 version = "0.1.0"

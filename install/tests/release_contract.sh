@@ -4,25 +4,38 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 assets=(
-  axiom-proxy-linux-aarch64.tar.gz
-  axiom-proxy-linux-x86_64.tar.gz
-  axiom-proxy-macos-aarch64.tar.gz
-  axiom-proxy-macos-x86_64.tar.gz
-  axiom-proxy-windows-aarch64.zip
-  axiom-proxy-windows-x86_64.zip
+  axiomio-linux-aarch64.AppImage
+  axiomio-linux-x86_64.AppImage
+  axiomio-macos-aarch64.app.tar.gz
+  axiomio-macos-aarch64.dmg
+  axiomio-macos-x86_64.app.tar.gz
+  axiomio-macos-x86_64.dmg
+  axiomio-windows-aarch64-setup.exe
+  axiomio-windows-x86_64-setup.exe
 )
 
 for asset in "${assets[@]}"; do
-  rg -Fq "$asset" "$ROOT/.github/workflows/release.yml"
   rg -Fq "$asset" "$ROOT/install/README.md"
 done
 
-rg -Fq 'axiom-proxy-${os}-${arch}.tar.gz' "$ROOT/install/install.sh"
-rg -Fq 'axiom-proxy-windows-$architecture.zip' "$ROOT/install/install.ps1"
+rg -Fq 'axiomio-linux-${{ matrix.arch }}.AppImage' "$ROOT/.github/workflows/release.yml"
+rg -Fq 'axiomio-macos-${{ matrix.arch }}.app.tar.gz' "$ROOT/.github/workflows/release.yml"
+rg -Fq 'axiomio-macos-${{ matrix.arch }}.dmg' "$ROOT/.github/workflows/release.yml"
+rg -Fq 'axiomio-windows-${{ matrix.arch }}-setup.exe' "$ROOT/.github/workflows/release.yml"
+rg -Fq 'axiomio-linux-${arch}.AppImage' "$ROOT/install/install.sh"
+rg -Fq 'axiomio-macos-${arch}.app.tar.gz' "$ROOT/install/install.sh"
+rg -Fq 'axiomio-windows-$architecture-setup.exe' "$ROOT/install/install.ps1"
 rg -Fq 'astrea-foundation/axiomio' "$ROOT/install/install.sh" "$ROOT/install/install.ps1"
 rg -Fq 'SHA256SUMS' "$ROOT/install/install.sh" "$ROOT/install/install.ps1" \
   "$ROOT/.github/workflows/release.yml"
-rg -Fq 'axiom-proxy-headless' "$ROOT/install/install.sh" "$ROOT/install/install.ps1" \
-  "$ROOT/.github/workflows/release.yml"
+rg -Fq 'Start-Process' "$ROOT/install/install.ps1"
+rg -Fq 'configure opencode' "$ROOT/install/install.sh" "$ROOT/install/install.ps1"
+
+if rg -n '(axiom-proxy-headless|axiom\.exe|cli/target)' \
+  "$ROOT/install/install.sh" "$ROOT/install/install.ps1" \
+  "$ROOT/install/README.md" "$ROOT/.github/workflows/release.yml"; then
+  echo "release contract still references obsolete binaries" >&2
+  exit 1
+fi
 
 echo "Release contract tests passed"

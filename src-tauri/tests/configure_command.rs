@@ -12,7 +12,7 @@ fn command_updates_an_explicit_jsonc_file() {
     )
     .unwrap();
 
-    Command::cargo_bin("axiom")
+    Command::cargo_bin("axiomio")
         .unwrap()
         .args([
             "configure",
