@@ -1,0 +1,34 @@
+[package]
+name = "axiom-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "AxiomIO — OpenAI-compatible local adapter with TEE-attested E2EE"
+
+[lib]
+name = "axiom_proxy_lib"
+# Desktop builds only need the rlib consumed by src-tauri/src/main.rs.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+axiom-core = { path = "../crates/axiom-core" }
+axiom-server = { path = "../crates/axiom-server" }
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[features]
+# Tauri's default; kept explicit for clarity.
+custom-protocol = ["tauri/custom-protocol"]

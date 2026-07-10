@@ -1,0 +1,21 @@
+[package]
+name = "axiom-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+description = "Axiom proxy installer and coding-agent configuration helper"
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "=4.5.23", features = ["derive"] }
+jsonc-parser = { version = "=0.26.3", features = ["cst"] }
+serde_json = "1"
+tempfile = "=3.20.0"
+
+[dev-dependencies]
+assert_cmd = "=2.0.16"

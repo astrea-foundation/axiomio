@@ -1,0 +1,144 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast gate: core + server crates on plain Linux (no webkit/Tauri toolchain needed).
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            cli
+      - name: Check proxy formatting
+        run: cargo fmt --all --check
+      - name: Lint proxy
+        run: cargo clippy --locked -p axiom-core -p axiom-server --all-targets -- -D warnings
+      - name: Test proxy
+        run: cargo test --locked -p axiom-core -p axiom-server
+      - name: Check helper formatting
+        working-directory: cli
+        run: cargo fmt --all --check
+      - name: Lint helper
+        working-directory: cli
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Test helper
+        working-directory: cli
+        run: cargo test --locked
+
+  # Full cross-platform app build (Linux / macOS x2 arch / Windows).
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: macos-14
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-14
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev build-essential curl wget file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ contains(matrix.args, 'x86_64-apple') && 'x86_64-apple-darwin' || contains(matrix.args, 'aarch64-apple') && 'aarch64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install UI dependencies
+        run: npm --prefix ui ci
+
+      - name: Configure macOS signing
+        if: startsWith(matrix.platform, 'macos')
+        shell: bash
+        env:
+          # Default: ad-hoc signing so macOS CI passes without an Apple Developer account.
+          # Later: set repository variable MACOS_SIGNING_MODE=developer-id and add the
+          # APPLE_* repository secrets below to produce signed/notarized Developer ID builds.
+          MACOS_SIGNING_MODE: ${{ vars.MACOS_SIGNING_MODE || 'adhoc' }}
+          APPLE_CERTIFICATE_SECRET: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_SECRET: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          case "$MACOS_SIGNING_MODE" in
+            adhoc|"")
+              echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+              ;;
+            developer-id)
+              missing=0
+              for name in \
+                APPLE_CERTIFICATE_SECRET \
+                APPLE_CERTIFICATE_PASSWORD_SECRET \
+                APPLE_SIGNING_IDENTITY_SECRET \
+                APPLE_ID_SECRET \
+                APPLE_PASSWORD_SECRET \
+                APPLE_TEAM_ID_SECRET
+              do
+                if [ -z "${!name}" ]; then
+                  echo "::error::$name is required when MACOS_SIGNING_MODE=developer-id"
+                  missing=1
+                fi
+              done
+              if [ "$missing" -ne 0 ]; then
+                exit 1
+              fi
+              {
+                echo "APPLE_CERTIFICATE<<__APPLE_CERTIFICATE__"
+                echo "$APPLE_CERTIFICATE_SECRET"
+                echo "__APPLE_CERTIFICATE__"
+                echo "APPLE_CERTIFICATE_PASSWORD<<__APPLE_CERTIFICATE_PASSWORD__"
+                echo "$APPLE_CERTIFICATE_PASSWORD_SECRET"
+                echo "__APPLE_CERTIFICATE_PASSWORD__"
+                echo "APPLE_SIGNING_IDENTITY<<__APPLE_SIGNING_IDENTITY__"
+                echo "$APPLE_SIGNING_IDENTITY_SECRET"
+                echo "__APPLE_SIGNING_IDENTITY__"
+                echo "APPLE_ID<<__APPLE_ID__"
+                echo "$APPLE_ID_SECRET"
+                echo "__APPLE_ID__"
+                echo "APPLE_PASSWORD<<__APPLE_PASSWORD__"
+                echo "$APPLE_PASSWORD_SECRET"
+                echo "__APPLE_PASSWORD__"
+                echo "APPLE_TEAM_ID<<__APPLE_TEAM_ID__"
+                echo "$APPLE_TEAM_ID_SECRET"
+                echo "__APPLE_TEAM_ID__"
+              } >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::MACOS_SIGNING_MODE must be 'adhoc' or 'developer-id'"
+              exit 1
+              ;;
+          esac
+
+      - name: Build app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          args: ${{ matrix.args }}

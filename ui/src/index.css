@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+/* Design tokens mirror the Axiom website (frontend/src/index.css) so the proxy reads as part of
+   the same product: neutral dark grey with cherry accents, Inter + Instrument Serif. */
+@theme {
+  --color-bg-base: #0e0e10;
+  --color-bg-sidebar: #0a0a0b;
+  --color-bg-surface: #18181b;
+  --color-bg-surface-hover: #232327;
+  --color-bg-elevated: #2a2a2e;
+  --color-bg-input: #141416;
+
+  --color-border: #26262b;
+  --color-border-strong: #38383e;
+  --color-border-accent: rgba(255, 77, 109, 0.22);
+
+  --color-cherry: #ff4d6d;
+  --color-cherry-bright: #ff6b85;
+  --color-cherry-soft: #e63d5b;
+  --color-cherry-deep: #8a1f30;
+  --color-cherry-glow: rgba(255, 77, 109, 0.12);
+
+  --color-emerald: #34d399;
+  --color-emerald-glow: rgba(52, 211, 153, 0.12);
+
+  --color-amber: #f5b64c;
+  --color-amber-glow: rgba(245, 182, 76, 0.12);
+
+  --color-text-primary: #f4f4f6;
+  --color-text-secondary: #a8a8ad;
+  --color-text-tertiary: #6f6f76;
+  --color-text-muted: #4d4d52;
+
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Instrument Serif", "Cormorant Garamond", Georgia, serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+input {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+}
+
+/* Ambient cherry glow behind the hero. */
+.cherry-glow {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 77, 109, 0.1) 0%,
+    rgba(255, 77, 109, 0.03) 40%,
+    transparent 72%
+  );
+}
+
+.text-gradient-cherry {
+  background: linear-gradient(135deg, #f4f4f6 0%, #ff6b85 65%, #d63048 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.04);
+  }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 107, 133, 0.25) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-glow,
+  .shimmer {
+    animation: none;
+  }
+}
+
+/* Custom disclosure chevron replaces the native marker in the History tab. */
+summary {
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::marker {
+  display: none;
+}

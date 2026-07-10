@@ -1,0 +1,113 @@
+name: proxy release
+
+on:
+  push:
+    tags:
+      - "proxy-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset: axiom-proxy-linux-x86_64.tar.gz
+            os: unix
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: axiom-proxy-linux-aarch64.tar.gz
+            os: unix
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            asset: axiom-proxy-macos-aarch64.tar.gz
+            os: unix
+          - runner: macos-14
+            target: x86_64-apple-darwin
+            asset: axiom-proxy-macos-x86_64.tar.gz
+            os: unix
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: axiom-proxy-windows-x86_64.zip
+            os: windows
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            asset: axiom-proxy-windows-aarch64.zip
+            os: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            cli
+
+      - name: Build headless proxy
+        run: cargo build --locked --release -p axiom-server --bin axiom-proxy-headless --target ${{ matrix.target }}
+
+      - name: Build Axiom setup helper
+        working-directory: cli
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package Unix archive
+        if: matrix.os == 'unix'
+        shell: bash
+        run: |
+          mkdir -p dist/package
+          cp "cli/target/${{ matrix.target }}/release/axiom" dist/package/axiom
+          cp "target/${{ matrix.target }}/release/axiom-proxy-headless" dist/package/axiom-proxy-headless
+          tar -czf "dist/${{ matrix.asset }}" -C dist/package axiom axiom-proxy-headless
+
+      - name: Package Windows archive
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          Copy-Item "cli/target/${{ matrix.target }}/release/axiom.exe" "dist/package/axiom.exe"
+          Copy-Item "target/${{ matrix.target }}/release/axiom-proxy-headless.exe" "dist/package/axiom-proxy-headless.exe"
+          Compress-Archive -Path "dist/package/axiom.exe", "dist/package/axiom-proxy-headless.exe" -DestinationPath "dist/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/proxy-v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum axiom-proxy-* > SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          dist/axiom-proxy-*
+          dist/SHA256SUMS
+          --verify-tag
+          --generate-notes
+          --title "Axiom Proxy ${{ github.ref_name }}"
