@@ -13,6 +13,7 @@ export interface ProxyStatus {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   version: string;
+  error: string | null;
 }
 
 export interface ApiKeyStatus {
@@ -108,6 +109,7 @@ export interface UpdateInfo {
 }
 
 export interface ProxyConfig {
+  schema_version: number;
   port: number;
   backend_url: string;
   attestation_ttl_secs: number;

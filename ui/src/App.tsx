@@ -157,7 +157,7 @@ export function App() {
         </div>
       </header>
 
-      <main className="relative min-h-0 flex-1 overflow-hidden px-3 py-3">
+      <main className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tab === "home" && (
           <HomeTab
             status={status}
@@ -317,7 +317,8 @@ function HomeTab({
   onToggle: () => void;
 }) {
   const running = status?.running ?? false;
-  const protectedNow = running && apiKeyPresent;
+  const connectionFailed = !running && apiKeyPresent && Boolean(status?.error);
+  const protectedNow = running && apiKeyPresent && !status?.error;
   const blockedByKey = !running && !apiKeyPresent;
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -344,7 +345,7 @@ function HomeTab({
   };
 
   return (
-    <div className="flex h-full flex-col gap-2.5 overflow-hidden">
+    <div className="flex min-h-full flex-col gap-2.5">
       {/* Hero */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -369,16 +370,26 @@ function HomeTab({
 
         <div className="text-center">
           <div className="text-[14px] font-medium">
-            {protectedNow ? "Protected" : running ? "Waiting for a key" : blockedByKey ? "API key required" : "Proxy off"}
+            {protectedNow
+              ? "Protected"
+              : connectionFailed
+                ? "Connection failed"
+                : running
+                  ? "Waiting for a key"
+                  : blockedByKey
+                    ? "API key required"
+                    : "Proxy off"}
           </div>
-          <div className="mt-1 max-w-[240px] text-[11px] leading-[16px] text-[var(--color-text-tertiary)]">
+          <div className="mt-1 max-w-[240px] break-words text-[11px] leading-[16px] text-[var(--color-text-tertiary)]">
             {protectedNow
               ? "Requests are end-to-end encrypted to the attested model TEE."
-              : running
-                ? "Add your API key below to start serving requests."
-                : blockedByKey
-                  ? "Add an API key below before starting the proxy."
-                  : "Start the proxy to accept OpenAI-compatible requests locally."}
+              : connectionFailed
+                ? status?.error
+                : running
+                  ? "Add your API key below to start serving requests."
+                  : blockedByKey
+                    ? "Add an API key below before starting the proxy."
+                    : "Start the proxy to accept OpenAI-compatible requests locally."}
           </div>
         </div>
 
@@ -512,7 +523,7 @@ function ActivityCard({ status }: { status: ProxyStatus }) {
   }, []);
 
   return (
-    <div className="min-h-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)]/60 px-3.5 py-2.5">
+    <div className="shrink-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)]/60 px-3.5 py-2.5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-[12.5px] font-medium">
           <Activity size={13} className="text-[var(--color-text-tertiary)]" />

@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "axiom-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "axiom-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "axiomio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "assert_cmd",
  "axiom-core",

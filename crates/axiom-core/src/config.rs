@@ -16,6 +16,9 @@ fn default_port() -> u16 {
 fn default_backend_url() -> String {
     "https://api.axiom.stream".to_string()
 }
+
+const LEGACY_DEVELOPMENT_BACKEND_URL: &str = "http://127.0.0.1:8080";
+const CURRENT_CONFIG_VERSION: u32 = 1;
 fn default_attestation_ttl() -> u64 {
     900
 }
@@ -25,6 +28,8 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub schema_version: u32,
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_backend_url")]
@@ -48,6 +53,7 @@ fn default_log_level() -> String {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            schema_version: CURRENT_CONFIG_VERSION,
             port: default_port(),
             backend_url: default_backend_url(),
             attestation_ttl_secs: default_attestation_ttl(),
@@ -85,6 +91,19 @@ impl Config {
         }
     }
 
+    /// Replace the development backend shipped by pre-release desktop builds.
+    pub fn migrate_legacy_defaults(&mut self) -> bool {
+        if self.schema_version >= CURRENT_CONFIG_VERSION {
+            return false;
+        }
+
+        if self.backend_url == LEGACY_DEVELOPMENT_BACKEND_URL {
+            self.backend_url = default_backend_url();
+        }
+        self.schema_version = CURRENT_CONFIG_VERSION;
+        true
+    }
+
     /// Atomic save: write a temp file next to the target, then rename over it.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
@@ -110,5 +129,29 @@ mod tests {
     #[test]
     fn production_backend_defaults_to_live_api_domain() {
         assert_eq!(Config::default().backend_url, "https://api.axiom.stream");
+    }
+
+    #[test]
+    fn migrates_the_pre_release_development_backend() {
+        let mut config = Config {
+            schema_version: 0,
+            backend_url: "http://127.0.0.1:8080".into(),
+            ..Config::default()
+        };
+
+        assert!(config.migrate_legacy_defaults());
+        assert_eq!(config.backend_url, "https://api.axiom.stream");
+        assert!(!config.migrate_legacy_defaults());
+    }
+
+    #[test]
+    fn preserves_an_explicit_local_backend_after_migration() {
+        let mut config = Config {
+            backend_url: "http://127.0.0.1:8080".into(),
+            ..Config::default()
+        };
+
+        assert!(!config.migrate_legacy_defaults());
+        assert_eq!(config.backend_url, "http://127.0.0.1:8080");
     }
 }

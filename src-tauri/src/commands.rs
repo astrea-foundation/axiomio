@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use axiom_core::config::Config;
 use axiom_core::events::{AttestationSummary, RequestLogEntry};
-use axiom_core::relay::{HttpRelay, RelayModel};
+use axiom_core::relay::{HttpRelay, RelayApi, RelayModel};
 use axiom_server::ProxyCore;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -27,6 +27,7 @@ pub struct ProxyStatus {
     pub total_prompt_tokens: u64,
     pub total_completion_tokens: u64,
     pub version: String,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -59,10 +60,11 @@ fn status_of(state: &AppState) -> ProxyStatus {
         total_prompt_tokens: core.counters.prompt_tokens.load(Ordering::Relaxed),
         total_completion_tokens: core.counters.completion_tokens.load(Ordering::Relaxed),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        error: state.last_error.read().unwrap().clone(),
     }
 }
 
-fn emit_status(app: &AppHandle) {
+pub(crate) fn emit_status(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _ = app.emit("proxy://status", status_of(&state));
 }
@@ -87,8 +89,22 @@ pub async fn start_server(
         let port = state.config.read().unwrap().port;
         (core, port)
     };
-    let handle = ServerHandle::start(core, port).await?;
+    if let Err(error) = core.refresh_models().await {
+        let error = format!("Backend validation failed: {error}");
+        *state.last_error.write().unwrap() = Some(error.clone());
+        emit_status(&app);
+        return Err(error);
+    }
+    let handle = match ServerHandle::start(core, port).await {
+        Ok(handle) => handle,
+        Err(error) => {
+            *state.last_error.write().unwrap() = Some(error.clone());
+            emit_status(&app);
+            return Err(error);
+        }
+    };
     *state.server.lock().unwrap() = Some(handle);
+    *state.last_error.write().unwrap() = None;
     emit_status(&app);
     let _ = app.emit(
         "proxy://server",
@@ -107,6 +123,7 @@ pub async fn stop_server(
     if let Some(handle) = handle {
         handle.stop().await;
     }
+    *state.last_error.write().unwrap() = None;
     emit_status(&app);
     let _ = app.emit("proxy://server", serde_json::json!({ "state": "stopped" }));
     Ok(status_of(&state))
@@ -168,8 +185,15 @@ pub async fn set_config(
     // If it was running, restart on the (possibly new) port with the (possibly rebuilt) core.
     if was_running {
         let core = state.core.read().unwrap().clone();
+        if let Err(error) = core.refresh_models().await {
+            let error = format!("Backend validation failed: {error}");
+            *state.last_error.write().unwrap() = Some(error.clone());
+            emit_status(&app);
+            return Err(error);
+        }
         let handle = ServerHandle::start(core, new_config.port).await?;
         *state.server.lock().unwrap() = Some(handle);
+        *state.last_error.write().unwrap() = None;
         spawn_catalog_verification(app.clone());
     }
     emit_status(&app);
@@ -186,13 +210,16 @@ pub async fn set_api_key(
     if !key.starts_with("axm_") {
         return Err("API keys start with axm_".into());
     }
+    let backend_url = state.config.read().unwrap().backend_url.clone();
+    HttpRelay::new(backend_url)
+        .list_models(&key)
+        .await
+        .map_err(|e| format!("API key validation failed: {e}"))?;
+
     keyring::store(&key)?;
     let core = state.core.read().unwrap().clone();
     core.set_api_key(Some(key.clone()));
-    // Validate against the backend; a bad key surfaces immediately.
-    core.refresh_models()
-        .await
-        .map_err(|e| format!("key set but validation failed: {e}"))?;
+    *state.last_error.write().unwrap() = None;
     emit_status(&app);
     if state.server.lock().unwrap().is_some() {
         spawn_catalog_verification(app.clone());
@@ -209,6 +236,7 @@ pub async fn clear_api_key(app: AppHandle, state: State<'_, AppState>) -> Result
         let _ = app.emit("proxy://server", serde_json::json!({ "state": "stopped" }));
     }
     state.core.read().unwrap().set_api_key(None);
+    *state.last_error.write().unwrap() = None;
     emit_status(&app);
     Ok(())
 }

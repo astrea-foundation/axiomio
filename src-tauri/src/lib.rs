@@ -26,6 +26,7 @@ pub struct AppState {
     pub config: RwLock<Config>,
     pub config_path: PathBuf,
     pub history_path: Option<PathBuf>,
+    pub last_error: RwLock<Option<String>>,
 }
 
 fn set_main_window_icon(app: &tauri::AppHandle) {
@@ -54,7 +55,12 @@ pub fn run() {
 
     let config_path = Config::default_path().unwrap_or_else(|_| PathBuf::from("config.json"));
     let history_path = Config::history_path().ok();
-    let config = Config::load(&config_path).unwrap_or_default();
+    let mut config = Config::load(&config_path).unwrap_or_default();
+    if config.migrate_legacy_defaults() {
+        if let Err(error) = config.save(&config_path) {
+            tracing::warn!(%error, "failed to persist migrated backend configuration");
+        }
+    }
     // Keyring may be unavailable (e.g. headless Linux); surface later via api_key_present rather
     // than failing startup or falling back to plaintext.
     let api_key = keyring::load().ok().flatten();
@@ -66,6 +72,7 @@ pub fn run() {
         config: RwLock::new(config.clone()),
         config_path,
         history_path,
+        last_error: RwLock::new(None),
     };
 
     tauri::Builder::default()
@@ -123,9 +130,20 @@ pub fn run() {
                     let port = state.config.read().unwrap().port;
                     (core, port)
                 };
+                if core.api_key().is_none() {
+                    return;
+                }
+                if let Err(error) = core.refresh_models().await {
+                    *handle.state::<AppState>().last_error.write().unwrap() =
+                        Some(format!("Backend validation failed: {error}"));
+                    commands::emit_status(&handle);
+                    return;
+                }
                 match ServerHandle::start(core, port).await {
                     Ok(h) => {
                         *handle.state::<AppState>().server.lock().unwrap() = Some(h);
+                        *handle.state::<AppState>().last_error.write().unwrap() = None;
+                        commands::emit_status(&handle);
                         let _ = handle.emit(
                             "proxy://server",
                             serde_json::json!({ "state": "listening", "port": port }),
@@ -133,6 +151,8 @@ pub fn run() {
                         commands::spawn_catalog_verification(handle.clone());
                     }
                     Err(e) => {
+                        *handle.state::<AppState>().last_error.write().unwrap() = Some(e.clone());
+                        commands::emit_status(&handle);
                         let _ = handle.emit(
                             "proxy://server",
                             serde_json::json!({ "state": "error", "port": port, "error": e }),
