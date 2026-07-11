@@ -9,6 +9,7 @@ mod server_handle;
 mod tray;
 mod update;
 
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -27,6 +28,18 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub history_path: Option<PathBuf>,
     pub last_error: RwLock<Option<String>>,
+}
+
+/// Returns true when the unified executable should launch the desktop shell.
+///
+/// The desktop autostart plugin invokes the application with exactly
+/// `--minimized`; all other arguments remain owned by the server CLI parser.
+pub fn is_desktop_launch(args: &[OsString]) -> bool {
+    args.len() == 1
+        || (args.len() == 2
+            && args
+                .get(1)
+                .is_some_and(|arg| arg == OsStr::new("--minimized")))
 }
 
 fn set_main_window_icon(app: &tauri::AppHandle) {
@@ -194,4 +207,35 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_desktop_launch;
+    use std::ffi::OsString;
+
+    fn args(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn launches_desktop_without_arguments() {
+        assert!(is_desktop_launch(&args(&["axiomio"])));
+    }
+
+    #[test]
+    fn launches_desktop_for_exact_minimized_autostart_invocation() {
+        assert!(is_desktop_launch(&args(&["axiomio", "--minimized"])));
+    }
+
+    #[test]
+    fn leaves_cli_and_unknown_arguments_to_the_command_parser() {
+        assert!(!is_desktop_launch(&args(&["axiomio", "--headless"])));
+        assert!(!is_desktop_launch(&args(&["axiomio", "--version"])));
+        assert!(!is_desktop_launch(&args(&[
+            "axiomio",
+            "--minimized",
+            "--headless",
+        ])));
+    }
 }

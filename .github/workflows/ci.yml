@@ -63,7 +63,7 @@ jobs:
         run: npm --prefix ui ci
 
       - name: Test unified executable
-        run: cargo test --locked -p axiomio --test configure_command
+        run: cargo test --locked -p axiomio
 
       - name: Configure macOS signing
         if: startsWith(matrix.platform, 'macos')

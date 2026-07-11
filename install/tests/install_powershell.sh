@@ -15,24 +15,35 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TEST_ROOT/release" "$TEST_ROOT/install/AxiomIO" "$TEST_ROOT/install/legacy"
+mkdir -p "$TEST_ROOT/release" "$TEST_ROOT/install/legacy"
 cat > "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-destination=""
-for argument in "$@"; do
-  case "$argument" in
-    /D=*) destination="${argument#/D=}" ;;
-  esac
-done
-destination="${destination%\"}"
-destination="${destination#\"}"
-[[ -n "$destination" ]]
-mkdir -p "$destination"
-printf 'upgraded desktop executable\n' > "$destination/axiomio.exe"
+fake installer payload
 SCRIPT
-chmod +x "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe"
-printf 'old desktop executable\n' > "$TEST_ROOT/install/AxiomIO/axiomio.exe"
+cat > "$TEST_ROOT/install/run-axiomup.ps1" <<'POWERSHELL'
+$scriptArguments = $args
+
+function Start-Process {
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [switch]$Wait,
+        [switch]$PassThru
+    )
+
+    if ($ArgumentList -notmatch '^/S /D=(.+)$') {
+        throw "Unexpected NSIS arguments: $ArgumentList"
+    }
+    $destination = $Matches[1]
+    if ($destination.Contains('"')) {
+        throw "NSIS /D= destination must not be quoted: $ArgumentList"
+    }
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $destination "axiomio.exe") -Value "upgraded desktop executable"
+    return [pscustomobject]@{ ExitCode = 0 }
+}
+
+& /work/install/axiomup.ps1 @scriptArguments
+POWERSHELL
 printf 'legacy cli\n' > "$TEST_ROOT/install/legacy/axiom.exe"
 printf 'legacy proxy\n' > "$TEST_ROOT/install/legacy/axiom-proxy-headless.exe"
 (
@@ -54,31 +65,34 @@ done
 curl -fsS "http://127.0.0.1:$PORT/SHA256SUMS" >/dev/null
 
 docker run --rm \
+  --user "$(id -u):$(id -g)" \
   --network host \
   -v "$ROOT:/work:ro" \
   -v "$TEST_ROOT/install:/output" \
   "$IMAGE" \
-  pwsh -NoProfile -File /work/install/axiomup.ps1 \
+  pwsh -NoProfile -File /output/run-axiomup.ps1 \
     -DownloadBase "http://127.0.0.1:$PORT" \
-    -DesktopInstallDir /output/AxiomIO \
+    -DesktopInstallDir "/output/AxiomIO With Spaces" \
     -LegacyInstallDir /output/legacy \
-    -SkipDesktopInstall \
     -SkipPathUpdate \
     -SkipOpenCode
 
-grep -Fq 'old desktop executable' "$TEST_ROOT/install/AxiomIO/axiomio.exe"
+grep -Fq 'upgraded desktop executable' "$TEST_ROOT/install/AxiomIO With Spaces/axiomio.exe"
 [[ ! -e "$TEST_ROOT/install/legacy/axiom.exe" ]]
 [[ ! -e "$TEST_ROOT/install/legacy/axiom-proxy-headless.exe" ]]
 
+grep -Fq '$installerArguments = "/S /D=$DesktopInstallDir"' "$ROOT/install/axiomup.ps1"
+
 printf 'tampered' >> "$TEST_ROOT/release/axiomio-windows-x86_64-setup.exe"
 if docker run --rm \
+  --user "$(id -u):$(id -g)" \
   --network host \
   -v "$ROOT:/work:ro" \
   -v "$TEST_ROOT/install:/output" \
   "$IMAGE" \
   pwsh -NoProfile -File /work/install/axiomup.ps1 \
     -DownloadBase "http://127.0.0.1:$PORT" \
-    -DesktopInstallDir /output/AxiomIO \
+    -DesktopInstallDir "/output/AxiomIO With Spaces" \
     -SkipDesktopInstall \
     -SkipPathUpdate \
     -SkipOpenCode >/dev/null 2>&1; then

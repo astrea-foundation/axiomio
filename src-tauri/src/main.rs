@@ -1,11 +1,12 @@
 fn main() {
-    if std::env::args_os().len() == 1 {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    if axiom_proxy_lib::is_desktop_launch(&args) {
         hide_windows_console();
         axiom_proxy_lib::run();
         return;
     }
 
-    if let Err(error) = axiom_server::command::run(std::env::args_os()) {
+    if let Err(error) = axiom_server::command::run(args) {
         eprintln!("axiomio: {error:#}");
         std::process::exit(1);
     }

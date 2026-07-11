@@ -83,7 +83,9 @@ try {
     }
 
     if (-not $SkipDesktopInstall) {
-        $installerArguments = "/S /D=`"$DesktopInstallDir`""
+        # NSIS requires /D= to be the final argument and consumes the complete
+        # remainder of the command line, including spaces, without quotes.
+        $installerArguments = "/S /D=$DesktopInstallDir"
         $process = Start-Process -FilePath $setup -ArgumentList $installerArguments -Wait -PassThru
         if ($process.ExitCode -ne 0) {
             throw "AxiomIO desktop installer failed (exit $($process.ExitCode))"
