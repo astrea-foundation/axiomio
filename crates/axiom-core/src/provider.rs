@@ -48,6 +48,8 @@ pub struct VerifiedModel {
 /// must not receive ciphertext.
 #[async_trait]
 pub trait Attestor: Send + Sync {
+    /// Stable identifier for the provider-specific evidence format and verification procedure.
+    fn protocol(&self) -> &'static str;
     async fn verify_model(&self, base_url: &str, expected_model: &str) -> Result<VerifiedModel>;
 }
 
@@ -56,6 +58,8 @@ pub trait Attestor: Send + Sync {
 pub trait CipherSession: Send {
     /// Public key the relay forwards to the provider, when the protocol has one.
     fn client_public_key_hex(&self) -> Option<String>;
+    /// Provider-specific session setup was completed and the session is safe to use.
+    fn is_ready(&self) -> bool;
     fn encrypt(&mut self, plaintext: &[u8]) -> Result<String>;
     fn decrypt(&mut self, wire: &str) -> Result<Vec<u8>>;
 }
@@ -80,16 +84,22 @@ pub struct ProviderRegistry {
 impl ProviderRegistry {
     /// The static set of built-in providers.
     pub fn builtin() -> Self {
-        let mut engines = HashMap::new();
-        engines.insert(
-            NEAR_PROVIDER_ID,
-            ProviderEngine {
-                id: NEAR_PROVIDER_ID,
-                attestor: Arc::new(NearAttestor),
-                cipher: Arc::new(NearCipher),
-            },
-        );
-        Self { engines }
+        Self::new(vec![ProviderEngine {
+            id: NEAR_PROVIDER_ID,
+            attestor: Arc::new(NearAttestor),
+            cipher: Arc::new(NearCipher),
+        }])
+        .expect("built-in provider ids must be unique")
+    }
+
+    pub fn new(engines: Vec<ProviderEngine>) -> Result<Self> {
+        let mut by_id = HashMap::new();
+        for engine in engines {
+            if by_id.insert(engine.id, engine).is_some() {
+                return Err(CoreError::Provider("duplicate provider id".into()));
+            }
+        }
+        Ok(Self { engines: by_id })
     }
 
     pub fn get(&self, provider_id: &str) -> Result<&ProviderEngine> {
@@ -98,8 +108,22 @@ impl ProviderRegistry {
             .ok_or_else(|| CoreError::Provider(format!("unknown provider: {provider_id}")))
     }
 
+    pub fn contains(&self, provider_id: &str) -> bool {
+        self.engines.contains_key(provider_id)
+    }
+
     pub fn for_model(&self, model: &RelayModel) -> Result<&ProviderEngine> {
-        self.get(&model.provider)
+        let engine = self.get(&model.provider)?;
+        if model.e2ee_protocol != engine.cipher.protocol()
+            || model.e2ee_encryption_version != engine.cipher.encryption_version()
+            || model.attestation_protocol != engine.attestor.protocol()
+        {
+            return Err(CoreError::Provider(format!(
+                "provider contract mismatch for model {}",
+                model.id
+            )));
+        }
+        Ok(engine)
     }
 }
 

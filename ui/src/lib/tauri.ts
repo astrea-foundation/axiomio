@@ -26,6 +26,11 @@ export interface ModelInfo {
   label: string;
   model: string;
   baseUrl: string;
+  provider: string;
+  providerLabel: string;
+  e2eeProtocol: string;
+  e2eeEncryptionVersion: number;
+  attestationProtocol: string;
 }
 
 export interface VerificationCheck {
@@ -53,6 +58,8 @@ export type RequestTerminalStatus = "completed" | "failed" | "cancelled";
 export interface E2eeAuditReceipt {
   protocol?: string;
   encryption_version?: number;
+  protocol_validated: boolean;
+  session_ready: boolean;
   request_encrypted: boolean;
   backend_key_accepted: boolean;
   response_decrypted: boolean;
@@ -62,6 +69,7 @@ export interface E2eeAuditReceipt {
 /** Metadata from the locally verified attestation used by a request; key material is a fingerprint only. */
 export interface TeeAuditReceipt {
   verified: boolean;
+  protocol?: string;
   verified_at_unix_ms?: number;
   age_ms?: number;
   model_key_sha256?: string;
@@ -95,9 +103,11 @@ export function isFullyVerified(entry: RequestLogEntry): boolean {
     entry.e2ee.request_encrypted &&
     entry.e2ee.backend_key_accepted &&
     entry.e2ee.response_decrypted &&
-    entry.e2ee.ephemeral_client_key &&
-    entry.e2ee.protocol === "near-v2" &&
-    entry.e2ee.encryption_version === 2
+    entry.e2ee.protocol_validated &&
+    entry.e2ee.session_ready &&
+    Boolean(entry.e2ee.protocol) &&
+    (entry.e2ee.encryption_version ?? 0) > 0 &&
+    Boolean(entry.tee.protocol)
   );
 }
 

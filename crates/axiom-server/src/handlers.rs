@@ -130,6 +130,13 @@ async fn build_relay_request(
         .cipher
         .new_session(&verified.model_public_key_hex)
         .map_err(|e| AppError::new(StatusCode::BAD_GATEWAY, "attestation_failed", e.to_string()))?;
+    if !session.is_ready() {
+        return Err(AppError::new(
+            StatusCode::BAD_GATEWAY,
+            "encryption_error",
+            "provider cipher session is not ready",
+        ));
+    }
 
     let mut encrypted_messages = Vec::with_capacity(req.messages.len());
     for message in &req.messages {
@@ -282,6 +289,8 @@ async fn build_relay_request(
         e2ee: E2eeAuditReceipt {
             protocol: relay_req.e2ee_protocol.clone(),
             encryption_version: Some(relay_req.encryption_version),
+            protocol_validated: true,
+            session_ready: session.is_ready(),
             request_encrypted: true,
             backend_key_accepted: false,
             response_decrypted: false,
@@ -289,6 +298,7 @@ async fn build_relay_request(
         },
         tee: TeeAuditReceipt {
             verified: true,
+            protocol: Some(model.attestation_protocol),
             verified_at_unix_ms: Some(attestation.verified_at_unix_ms),
             age_ms: Some(attestation.age_ms),
             model_key_sha256: Some(hex::encode(Sha256::digest(&key_bytes))),

@@ -4,8 +4,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::provider::VerificationCheck;
-use crate::providers::near::{NEAR_V2_ENCRYPTION_VERSION, NEAR_V2_PROTOCOL};
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum RequestPhase {
@@ -49,6 +47,12 @@ pub struct E2eeAuditReceipt {
     pub protocol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption_version: Option<u8>,
+    /// The catalog contract exactly matched a locally registered provider engine.
+    #[serde(default)]
+    pub protocol_validated: bool,
+    /// The provider-specific cipher confirmed its per-request session was ready.
+    #[serde(default)]
+    pub session_ready: bool,
     pub request_encrypted: bool,
     pub backend_key_accepted: bool,
     pub response_decrypted: bool,
@@ -60,6 +64,8 @@ pub struct E2eeAuditReceipt {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TeeAuditReceipt {
     pub verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_at_unix_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,9 +107,19 @@ impl RequestLogEntry {
             && self.e2ee.request_encrypted
             && self.e2ee.backend_key_accepted
             && self.e2ee.response_decrypted
-            && self.e2ee.ephemeral_client_key
-            && self.e2ee.protocol.as_deref() == Some(NEAR_V2_PROTOCOL)
-            && self.e2ee.encryption_version == Some(NEAR_V2_ENCRYPTION_VERSION)
+            && self.e2ee.protocol_validated
+            && self.e2ee.session_ready
+            && self
+                .e2ee
+                .protocol
+                .as_ref()
+                .is_some_and(|value| !value.is_empty())
+            && self.e2ee.encryption_version.is_some_and(|value| value > 0)
+            && self
+                .tee
+                .protocol
+                .as_ref()
+                .is_some_and(|value| !value.is_empty())
     }
 }
 
@@ -126,8 +142,10 @@ mod tests {
             finish_reason: Some("stop".into()),
             error_kind: None,
             e2ee: E2eeAuditReceipt {
-                protocol: Some(NEAR_V2_PROTOCOL.into()),
-                encryption_version: Some(NEAR_V2_ENCRYPTION_VERSION),
+                protocol: Some("near-v2".into()),
+                encryption_version: Some(2),
+                protocol_validated: true,
+                session_ready: true,
                 request_encrypted: true,
                 backend_key_accepted: true,
                 response_decrypted: true,
@@ -135,22 +153,23 @@ mod tests {
             },
             tee: TeeAuditReceipt {
                 verified: true,
+                protocol: Some("near-tdx-nvidia-v1".into()),
                 ..Default::default()
             },
         }
     }
 
     #[test]
-    fn verified_completion_requires_exact_near_v2_evidence() {
+    fn verified_completion_requires_registered_provider_evidence() {
         let entry = completed_receipt();
         assert!(entry.verified_completed());
 
         let mut wrong_protocol = entry.clone();
-        wrong_protocol.e2ee.protocol = Some("near-v3".into());
+        wrong_protocol.e2ee.protocol_validated = false;
         assert!(!wrong_protocol.verified_completed());
 
         let mut wrong_version = entry.clone();
-        wrong_version.e2ee.encryption_version = Some(1);
+        wrong_version.e2ee.encryption_version = Some(0);
         assert!(!wrong_version.verified_completed());
 
         let mut failed = entry;

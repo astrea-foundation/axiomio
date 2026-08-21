@@ -136,6 +136,8 @@ mod tests {
             e2ee: E2eeAuditReceipt {
                 protocol: Some("near-v2".into()),
                 encryption_version: Some(2),
+                protocol_validated: true,
+                session_ready: true,
                 request_encrypted: true,
                 backend_key_accepted: true,
                 response_decrypted: true,
@@ -143,6 +145,7 @@ mod tests {
             },
             tee: TeeAuditReceipt {
                 verified: true,
+                protocol: Some("near-tdx-nvidia-v1".into()),
                 verified_at_unix_ms: Some(1),
                 age_ms: Some(0),
                 model_key_sha256: Some("ab".repeat(32)),

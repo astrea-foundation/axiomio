@@ -10,6 +10,7 @@ use crate::provider::{Attestor, CipherSession, ProviderCipher, VerifiedModel};
 
 /// Matches the backend's usage/catalog provider id.
 pub const NEAR_PROVIDER_ID: &str = "near";
+pub const NEAR_ATTESTATION_PROTOCOL: &str = "near-tdx-nvidia-v1";
 pub const NEAR_V2_PROTOCOL: &str = "near-v2";
 pub const NEAR_V2_ENCRYPTION_VERSION: u8 = 2;
 
@@ -23,6 +24,10 @@ pub struct NearAttestor;
 
 #[async_trait]
 impl Attestor for NearAttestor {
+    fn protocol(&self) -> &'static str {
+        NEAR_ATTESTATION_PROTOCOL
+    }
+
     async fn verify_model(&self, base_url: &str, expected_model: &str) -> Result<VerifiedModel> {
         attestation::verify_model(base_url, expected_model).await
     }
@@ -57,6 +62,10 @@ struct NearSession {
 impl CipherSession for NearSession {
     fn client_public_key_hex(&self) -> Option<String> {
         Some(self.keypair.public_hex.clone())
+    }
+
+    fn is_ready(&self) -> bool {
+        !self.keypair.public_hex.is_empty()
     }
 
     fn encrypt(&mut self, plaintext: &[u8]) -> Result<String> {

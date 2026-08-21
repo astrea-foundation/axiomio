@@ -133,7 +133,25 @@ impl ProxyCore {
         let key = self
             .api_key()
             .ok_or_else(|| CoreError::Relay("no API key configured".into()))?;
-        let models = self.relay.list_models(&key).await?;
+        let advertised = self.relay.list_models(&key).await?;
+        let mut models = Vec::with_capacity(advertised.len());
+        for model in advertised {
+            if !self.registry.contains(&model.provider) {
+                tracing::warn!(
+                    provider = %model.provider,
+                    model = %model.id,
+                    "model omitted because this proxy has no local provider engine"
+                );
+                continue;
+            }
+            self.registry.for_model(&model)?;
+            models.push(model);
+        }
+        if models.is_empty() {
+            return Err(CoreError::Provider(
+                "backend advertised no models supported by this proxy".into(),
+            ));
+        }
         *self.models.write().unwrap() = models.clone();
         Ok(models)
     }
@@ -145,19 +163,28 @@ impl ProxyCore {
     /// Resolve a client-supplied model string against the catalog by id, full provider name, or
     /// base_url; returns the catalog entry. Refreshes the catalog once on a miss.
     pub async fn resolve_model(&self, requested: &str) -> Result<RelayModel> {
-        if let Some(found) = Self::match_model(&self.cached_models(), requested) {
+        if let Some(found) = Self::match_model(&self.cached_models(), requested)? {
             return Ok(found);
         }
         let models = self.refresh_models().await?;
-        Self::match_model(&models, requested)
+        Self::match_model(&models, requested)?
             .ok_or_else(|| CoreError::Relay(format!("unknown model: {requested}")))
     }
 
-    fn match_model(models: &[RelayModel], requested: &str) -> Option<RelayModel> {
-        models
+    fn match_model(models: &[RelayModel], requested: &str) -> Result<Option<RelayModel>> {
+        if let Some(model) = models.iter().find(|model| model.id == requested) {
+            return Ok(Some(model.clone()));
+        }
+        let mut matches = models
             .iter()
-            .find(|m| m.id == requested || m.model == requested || m.base_url == requested)
-            .cloned()
+            .filter(|model| model.model == requested || model.base_url == requested);
+        let first = matches.next().cloned();
+        if matches.next().is_some() {
+            return Err(CoreError::Relay(format!(
+                "ambiguous model reference: {requested}; use a provider offering id"
+            )));
+        }
+        Ok(first)
     }
 
     /// Locally verify (and cache) the model TEE attestation. Single-flight per model; fail-closed.
@@ -293,5 +320,53 @@ impl ProxyCore {
         self.counters
             .completion_tokens
             .fetch_add(completion as u64, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(id: &str, provider: &str, upstream: &str, base_url: &str) -> RelayModel {
+        RelayModel {
+            id: id.into(),
+            label: id.into(),
+            short_label: id.into(),
+            model: upstream.into(),
+            base_url: base_url.into(),
+            provider: provider.into(),
+            provider_label: provider.into(),
+            e2ee_protocol: "test-e2ee-v1".into(),
+            e2ee_encryption_version: 1,
+            attestation_protocol: "test-attestation-v1".into(),
+            supported_reasoning_efforts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn offering_id_disambiguates_same_model_from_multiple_providers() {
+        let models = vec![
+            model(
+                "shared-provider-a",
+                "provider-a",
+                "org/shared-model",
+                "https://a.example/v1",
+            ),
+            model(
+                "shared-provider-b",
+                "provider-b",
+                "org/shared-model",
+                "https://b.example/v1",
+            ),
+        ];
+
+        assert_eq!(
+            ProxyCore::match_model(&models, "shared-provider-b")
+                .unwrap()
+                .unwrap()
+                .provider,
+            "provider-b"
+        );
+        assert!(ProxyCore::match_model(&models, "org/shared-model").is_err());
     }
 }

@@ -44,6 +44,11 @@ pub struct ModelInfo {
     pub label: String,
     pub model: String,
     pub base_url: String,
+    pub provider: String,
+    pub provider_label: String,
+    pub e2ee_protocol: String,
+    pub e2ee_encryption_version: u8,
+    pub attestation_protocol: String,
 }
 
 fn status_of(state: &AppState) -> ProxyStatus {
@@ -278,6 +283,11 @@ pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, S
             label: m.label,
             model: m.model,
             base_url: m.base_url,
+            provider: m.provider,
+            provider_label: m.provider_label,
+            e2ee_protocol: m.e2ee_protocol,
+            e2ee_encryption_version: m.e2ee_encryption_version,
+            attestation_protocol: m.attestation_protocol,
         })
         .collect())
 }

@@ -10,10 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 
-fn default_provider() -> String {
-    "near".to_string()
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayModel {
     pub id: String,
@@ -21,9 +17,11 @@ pub struct RelayModel {
     pub short_label: String,
     pub model: String,
     pub base_url: String,
-    // Defaults so the proxy keeps working against backends that predate the provider field.
-    #[serde(default = "default_provider")]
     pub provider: String,
+    pub provider_label: String,
+    pub e2ee_protocol: String,
+    pub e2ee_encryption_version: u8,
+    pub attestation_protocol: String,
     #[serde(default)]
     pub supported_reasoning_efforts: Vec<String>,
 }

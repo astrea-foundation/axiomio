@@ -445,6 +445,10 @@ fn test_model() -> RelayModel {
         model: "google/gemma-4-31B-it".into(),
         base_url: "https://gemma-4-31b.completions.near.ai/v1".into(),
         provider: "near".into(),
+        provider_label: "NEAR AI".into(),
+        e2ee_protocol: "near-v2".into(),
+        e2ee_encryption_version: 2,
+        attestation_protocol: "near-tdx-nvidia-v1".into(),
         supported_reasoning_efforts: Vec::new(),
     }
 }
@@ -457,6 +461,10 @@ fn reasoning_model() -> RelayModel {
         model: "z-ai/glm-5.2".into(),
         base_url: "https://glm-5-2.completions.near.ai/v1".into(),
         provider: "near".into(),
+        provider_label: "NEAR AI".into(),
+        e2ee_protocol: "near-v2".into(),
+        e2ee_encryption_version: 2,
+        attestation_protocol: "near-tdx-nvidia-v1".into(),
         supported_reasoning_efforts: vec![
             "low".into(),
             "medium".into(),
