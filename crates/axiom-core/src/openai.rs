@@ -648,6 +648,8 @@ pub struct ModelEntry {
     pub id: String,
     pub object: &'static str,
     pub owned_by: &'static str,
+    pub context_window_tokens: u32,
+    pub max_output_tokens: u32,
     pub supported_reasoning_efforts: Vec<String>,
 }
 

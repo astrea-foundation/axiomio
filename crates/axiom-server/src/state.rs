@@ -339,6 +339,8 @@ mod tests {
             e2ee_protocol: "test-e2ee-v1".into(),
             e2ee_encryption_version: 1,
             attestation_protocol: "test-attestation-v1".into(),
+            context_window_tokens: 4096,
+            max_output_tokens: 1024,
             supported_reasoning_efforts: Vec::new(),
         }
     }

@@ -126,6 +126,11 @@ fn merge_provider(source: &str, base_url: &str) -> Result<String> {
             "apiKey": "unused"
         },
         "models": {
+            "deepseek-v4-flash": {
+                "name": "Axiom DeepSeek V4 Flash",
+                "reasoning": true,
+                "tool_call": true
+            },
             "glm-5-2": {
                 "name": "Axiom GLM-5.2",
                 "reasoning": true,
@@ -234,6 +239,8 @@ mod tests {
         assert_eq!(twice.matches(r#""axiom""#).count(), 1);
         assert!(twice.contains(r#""reasoning": true"#));
         assert!(twice.contains(r#""tool_call": true"#));
+        assert!(twice.contains(r#""deepseek-v4-flash""#));
+        assert!(twice.contains("Axiom DeepSeek V4 Flash"));
         assert!(twice.contains(r#""max""#));
         assert!(twice.contains(r#""disabled": true"#));
         assert!(!twice.contains(r#""glm-5-1""#));

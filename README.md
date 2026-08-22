@@ -85,6 +85,11 @@ OpenCode configuration.
         "apiKey": "unused"
       },
       "models": {
+        "deepseek-v4-flash": {
+          "name": "Axiom DeepSeek V4 Flash",
+          "reasoning": true,
+          "tool_call": true
+        },
         "glm-5-2": {
           "name": "Axiom GLM-5.2",
           "variants": {

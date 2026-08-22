@@ -23,6 +23,10 @@ pub struct RelayModel {
     pub e2ee_encryption_version: u8,
     pub attestation_protocol: String,
     #[serde(default)]
+    pub context_window_tokens: u32,
+    #[serde(default)]
+    pub max_output_tokens: u32,
+    #[serde(default)]
     pub supported_reasoning_efforts: Vec<String>,
 }
 

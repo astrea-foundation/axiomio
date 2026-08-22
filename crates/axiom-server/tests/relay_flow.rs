@@ -449,6 +449,8 @@ fn test_model() -> RelayModel {
         e2ee_protocol: "near-v2".into(),
         e2ee_encryption_version: 2,
         attestation_protocol: "near-tdx-nvidia-v1".into(),
+        context_window_tokens: 262_144,
+        max_output_tokens: 8_192,
         supported_reasoning_efforts: Vec::new(),
     }
 }
@@ -465,6 +467,8 @@ fn reasoning_model() -> RelayModel {
         e2ee_protocol: "near-v2".into(),
         e2ee_encryption_version: 2,
         attestation_protocol: "near-tdx-nvidia-v1".into(),
+        context_window_tokens: 1_048_576,
+        max_output_tokens: 16_384,
         supported_reasoning_efforts: vec![
             "low".into(),
             "medium".into(),
@@ -738,6 +742,10 @@ async fn models_expose_supported_reasoning_efforts() {
         json!(["low", "medium", "high", "xhigh"])
     );
     assert_eq!(gemma["supported_reasoning_efforts"], json!([]));
+    assert_eq!(glm["context_window_tokens"], json!(1_048_576));
+    assert_eq!(glm["max_output_tokens"], json!(16_384));
+    assert_eq!(gemma["context_window_tokens"], json!(262_144));
+    assert_eq!(gemma["max_output_tokens"], json!(8_192));
     cancel.cancel();
 }
 

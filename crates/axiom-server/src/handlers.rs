@@ -529,6 +529,8 @@ pub async fn list_models(
                 id: m.id,
                 object: "model",
                 owned_by: "axiom",
+                context_window_tokens: m.context_window_tokens,
+                max_output_tokens: m.max_output_tokens,
                 supported_reasoning_efforts: m.supported_reasoning_efforts,
             })
             .collect(),
