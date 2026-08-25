@@ -144,6 +144,8 @@ pub struct RelayChatRequest {
     pub response_format: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_e2ee_context: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -195,6 +197,31 @@ pub struct RelayCompletion {
     pub finish_reason: Option<String>,
     #[serde(default)]
     pub usage: RelayUsage,
+    #[serde(default)]
+    pub proof: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderE2eeKey {
+    pub model_id: String,
+    pub model: String,
+    pub base_url: String,
+    pub provider: String,
+    pub attestation_protocol: String,
+    pub signing_algo: String,
+    pub encryption_version: u8,
+    pub e2ee_protocol: String,
+    pub model_public_key: String,
+    #[serde(default)]
+    pub requires_model_public_key_header: bool,
+    pub verified: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderAttestationEvidence {
+    pub provider: String,
+    pub attestation_protocol: String,
+    pub evidence: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -237,6 +264,23 @@ pub trait RelayApi: Send + Sync {
     async fn list_models(&self, api_key: &str) -> Result<Vec<RelayModel>>;
     async fn complete(&self, api_key: &str, req: &RelayChatRequest) -> Result<RelayCompletion>;
     async fn stream(&self, api_key: &str, req: &RelayChatRequest) -> Result<RelayStream>;
+
+    async fn provider_e2ee_key(&self, _api_key: &str, _model_id: &str) -> Result<ProviderE2eeKey> {
+        Err(CoreError::Relay(
+            "relay client does not implement provider key evidence".into(),
+        ))
+    }
+
+    async fn provider_attestation_report(
+        &self,
+        _api_key: &str,
+        _model_id: &str,
+        _nonce: &str,
+    ) -> Result<ProviderAttestationEvidence> {
+        Err(CoreError::Relay(
+            "relay client does not implement provider attestation evidence".into(),
+        ))
+    }
 }
 
 pub struct HttpRelay {
@@ -360,6 +404,39 @@ impl RelayApi for HttpRelay {
                 }
             });
         Ok(Box::pin(events))
+    }
+
+    async fn provider_e2ee_key(&self, api_key: &str, model_id: &str) -> Result<ProviderE2eeKey> {
+        let resp = self
+            .client
+            .get(self.url("/provider/e2ee-key"))
+            .bearer_auth(api_key)
+            .query(&[("model_id", model_id)])
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(Self::error_for_status(resp).await);
+        }
+        Ok(resp.json().await?)
+    }
+
+    async fn provider_attestation_report(
+        &self,
+        api_key: &str,
+        model_id: &str,
+        nonce: &str,
+    ) -> Result<ProviderAttestationEvidence> {
+        let resp = self
+            .client
+            .get(self.url("/provider/attestation/report"))
+            .bearer_auth(api_key)
+            .query(&[("model_id", model_id), ("nonce", nonce)])
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(Self::error_for_status(resp).await);
+        }
+        Ok(resp.json().await?)
     }
 }
 

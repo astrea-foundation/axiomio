@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axiom_core::error::{CoreError, Result};
 use axiom_core::events::RequestLogEntry;
-use axiom_core::provider::{ProviderRegistry, VerifiedModel};
+use axiom_core::provider::{AttestationRequest, ProviderRegistry, VerifiedModel};
 use axiom_core::relay::{RelayApi, RelayModel};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -52,6 +52,14 @@ pub struct ProxyCore {
 }
 
 impl ProxyCore {
+    fn cached_attestation_is_fresh(&self, entry: &CachedAttestation) -> bool {
+        entry.at.elapsed() < self.attestation_ttl
+            && entry
+                .verified
+                .expires_at_unix
+                .is_none_or(|expires| expires > current_unix_seconds())
+    }
+
     pub fn new(
         relay: Arc<dyn RelayApi>,
         api_key: Option<String>,
@@ -197,7 +205,7 @@ impl ProxyCore {
         model: &RelayModel,
     ) -> Result<AttestationReceipt> {
         if let Some(entry) = self.attestations.read().unwrap().get(&model.id) {
-            if entry.at.elapsed() < self.attestation_ttl {
+            if self.cached_attestation_is_fresh(entry) {
                 return Ok(AttestationReceipt {
                     verified: entry.verified.clone(),
                     verified_at_unix_ms: entry.verified_at_unix_ms,
@@ -215,7 +223,7 @@ impl ProxyCore {
         let _guard = lock.lock().await;
         // Re-check: another task may have verified while we waited.
         if let Some(entry) = self.attestations.read().unwrap().get(&model.id) {
-            if entry.at.elapsed() < self.attestation_ttl {
+            if self.cached_attestation_is_fresh(entry) {
                 return Ok(AttestationReceipt {
                     verified: entry.verified.clone(),
                     verified_at_unix_ms: entry.verified_at_unix_ms,
@@ -224,10 +232,19 @@ impl ProxyCore {
             }
         }
         let engine = self.registry.for_model(model)?;
+        let api_key = self
+            .api_key()
+            .ok_or_else(|| CoreError::Relay("no API key configured".into()))?;
         let verified = Arc::new(
             engine
                 .attestor
-                .verify_model(&model.base_url, &model.model)
+                .verify_model(AttestationRequest {
+                    base_url: &model.base_url,
+                    model_id: &model.id,
+                    expected_model: &model.model,
+                    relay: self.relay.as_ref(),
+                    api_key: &api_key,
+                })
                 .await?,
         );
         let verified_at_unix_ms = SystemTime::now()
@@ -262,6 +279,8 @@ impl ProxyCore {
                     model_public_key_hex,
                     tls_fingerprint: Some("56".repeat(32)),
                     checks: axiom_core::attestation::near_checks("UpToDate", "verified"),
+                    provider_state: None,
+                    expires_at_unix: None,
                 }),
                 at: Instant::now(),
                 verified_at_unix_ms: SystemTime::now()
@@ -278,7 +297,7 @@ impl ProxyCore {
             .read()
             .unwrap()
             .iter()
-            .filter(|(_, e)| e.at.elapsed() < self.attestation_ttl)
+            .filter(|(_, e)| self.cached_attestation_is_fresh(e))
             .map(|(id, e)| (id.clone(), e.verified.clone()))
             .collect()
     }
@@ -321,6 +340,13 @@ impl ProxyCore {
             .completion_tokens
             .fetch_add(completion as u64, Ordering::Relaxed);
     }
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]

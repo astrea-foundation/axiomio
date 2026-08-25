@@ -177,6 +177,8 @@ pub fn verify_report(
         model_public_key_hex: key,
         tls_fingerprint: Some(fp),
         checks: near_checks(intel_status, nvidia_status),
+        provider_state: None,
+        expires_at_unix: None,
     })
 }
 

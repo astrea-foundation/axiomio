@@ -61,7 +61,10 @@ input for that API is not supported. Tool execution stays inside OpenCode. The
 local proxy encrypts message content, tool names and descriptions, parameter
 schemas, named choices, arguments, and tool results to the model key accepted
 from verified Ed25519 TEE attestation; the backend only relays provider
-ciphertext. This does not add tools to Axiom's frontend path.
+ciphertext. This complete tool-field contract currently applies to NEAR offerings. Phala ACI
+offerings reject tool calls and streaming until those paths have the same field-specific AAD and
+signed-receipt binding as Phala's non-streaming text path. This does not add tools to Axiom's
+frontend path.
 
 Start the proxy with the real relay credential only in the proxy environment:
 

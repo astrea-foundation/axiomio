@@ -9,7 +9,7 @@ use axiom_core::openai::{
     ChatRequest, Choice, FunctionCall, ModelEntry, ModelList, ToolCall, ToolChoice, Usage,
     MAX_RELAY_REQUEST_BYTES,
 };
-use axiom_core::provider::CipherSession;
+use axiom_core::provider::{CipherSession, PlainProviderMessage, PlainProviderRequest};
 use axiom_core::relay::{
     RelayChatRequest, RelayEncryptedFunctionCall, RelayEncryptedFunctionDefinition,
     RelayEncryptedNamedFunction, RelayEncryptedNamedToolChoice, RelayEncryptedTool,
@@ -128,7 +128,7 @@ async fn build_relay_request(
     let verified = &attestation.verified;
     let mut session = engine
         .cipher
-        .new_session(&verified.model_public_key_hex)
+        .new_session(verified)
         .map_err(|e| AppError::new(StatusCode::BAD_GATEWAY, "attestation_failed", e.to_string()))?;
     if !session.is_ready() {
         return Err(AppError::new(
@@ -138,29 +138,62 @@ async fn build_relay_request(
         ));
     }
 
+    if req.stream && !session.supports_streaming() {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            format!("streaming is not supported for model {}", model.id),
+        ));
+    }
+
     let mut encrypted_messages = Vec::with_capacity(req.messages.len());
-    for message in &req.messages {
+    let mut plaintext_messages = Vec::with_capacity(req.messages.len());
+    for (message_index, message) in req.messages.iter().enumerate() {
         let text = message
             .content_text()
             .map_err(|m| AppError::new(StatusCode::BAD_REQUEST, "invalid_request_error", m))?;
         let encrypted_content = text
             .as_deref()
-            .map(|value| encrypt_text(session.as_mut(), value))
+            .map(|value| {
+                encrypt_text(
+                    session.as_mut(),
+                    value,
+                    &format!("messages.{message_index}.content"),
+                )
+            })
             .transpose()?;
         let encrypted_reasoning_content = message
             .reasoning_content
             .as_deref()
-            .map(|value| encrypt_text(session.as_mut(), value))
+            .map(|value| {
+                encrypt_text(
+                    session.as_mut(),
+                    value,
+                    &format!("messages.{message_index}.reasoning_content"),
+                )
+            })
             .transpose()?;
         let encrypted_name = message
             .name
             .as_deref()
-            .map(|value| encrypt_text(session.as_mut(), value))
+            .map(|value| {
+                encrypt_text(
+                    session.as_mut(),
+                    value,
+                    &format!("messages.{message_index}.name"),
+                )
+            })
             .transpose()?;
         let encrypted_refusal = message
             .refusal
             .as_deref()
-            .map(|value| encrypt_text(session.as_mut(), value))
+            .map(|value| {
+                encrypt_text(
+                    session.as_mut(),
+                    value,
+                    &format!("messages.{message_index}.refusal"),
+                )
+            })
             .transpose()?;
         let encrypted_tool_calls = message
             .tool_calls
@@ -168,7 +201,8 @@ async fn build_relay_request(
             .map(|tool_calls| {
                 tool_calls
                     .iter()
-                    .map(|tool_call| {
+                    .enumerate()
+                    .map(|(tool_index, tool_call)| {
                         Ok(RelayEncryptedToolCall {
                             id: tool_call.id.clone(),
                             kind: tool_call.kind.clone(),
@@ -176,10 +210,16 @@ async fn build_relay_request(
                                 encrypted_name: encrypt_text(
                                     session.as_mut(),
                                     &tool_call.function.name,
+                                    &format!(
+                                        "messages.{message_index}.tool_calls.{tool_index}.name"
+                                    ),
                                 )?,
                                 encrypted_arguments: encrypt_text(
                                     session.as_mut(),
                                     &tool_call.function.arguments,
+                                    &format!(
+                                        "messages.{message_index}.tool_calls.{tool_index}.arguments"
+                                    ),
                                 )?,
                             },
                         })
@@ -196,6 +236,17 @@ async fn build_relay_request(
             encrypted_tool_calls,
             tool_call_id: message.tool_call_id.clone(),
         });
+        plaintext_messages.push(PlainProviderMessage {
+            role: message.role.as_str().to_string(),
+            content: text,
+            assistant_null_content: message.role.as_str() == "assistant",
+            has_extended_fields: message.reasoning_content.is_some()
+                || message.name.is_some()
+                || message.refusal.is_some()
+                || message.tool_calls.is_some()
+                || message.tool_call_id.is_some()
+                || message.role.as_str() == "tool",
+        });
     }
 
     let encrypted_tools = req
@@ -204,7 +255,8 @@ async fn build_relay_request(
         .map(|tools| {
             tools
                 .iter()
-                .map(|tool| {
+                .enumerate()
+                .map(|(tool_index, tool)| {
                     let parameters =
                         serde_json::to_string(&tool.function.parameters).map_err(|_| {
                             AppError::new(
@@ -216,14 +268,28 @@ async fn build_relay_request(
                     Ok(RelayEncryptedTool {
                         kind: tool.kind.clone(),
                         function: RelayEncryptedFunctionDefinition {
-                            encrypted_name: encrypt_text(session.as_mut(), &tool.function.name)?,
+                            encrypted_name: encrypt_text(
+                                session.as_mut(),
+                                &tool.function.name,
+                                &format!("tools.{tool_index}.function.name"),
+                            )?,
                             encrypted_description: tool
                                 .function
                                 .description
                                 .as_deref()
-                                .map(|value| encrypt_text(session.as_mut(), value))
+                                .map(|value| {
+                                    encrypt_text(
+                                        session.as_mut(),
+                                        value,
+                                        &format!("tools.{tool_index}.function.description"),
+                                    )
+                                })
                                 .transpose()?,
-                            encrypted_parameters: encrypt_text(session.as_mut(), &parameters)?,
+                            encrypted_parameters: encrypt_text(
+                                session.as_mut(),
+                                &parameters,
+                                &format!("tools.{tool_index}.function.parameters"),
+                            )?,
                             strict: tool.function.strict,
                         },
                     })
@@ -241,13 +307,40 @@ async fn build_relay_request(
                 RelayEncryptedNamedToolChoice {
                     kind: named.kind.clone(),
                     function: RelayEncryptedNamedFunction {
-                        encrypted_name: encrypt_text(session.as_mut(), &named.function.name)?,
+                        encrypted_name: encrypt_text(
+                            session.as_mut(),
+                            &named.function.name,
+                            "tool_choice.function.name",
+                        )?,
                     },
                 },
             )),
         })
         .transpose()?;
 
+    let effective_max_tokens = req
+        .max_tokens
+        .unwrap_or(model.max_output_tokens)
+        .min(model.max_output_tokens);
+    let provider_e2ee_context = session
+        .prepare_request_context(&PlainProviderRequest {
+            model: model.model.clone(),
+            messages: plaintext_messages,
+            max_tokens: effective_max_tokens,
+            sampling: req.sampling(),
+            response_format: req.response_format.clone(),
+            reasoning_effort: reasoning_effort.clone(),
+            has_tools: req.tools.is_some()
+                || req.tool_choice.is_some()
+                || req.parallel_tool_calls.is_some(),
+        })
+        .map_err(|e| {
+            AppError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                e.to_string(),
+            )
+        })?;
     let relay_req = RelayChatRequest {
         model_id: model.id.clone(),
         encryption_version: engine.cipher.encryption_version(),
@@ -260,10 +353,11 @@ async fn build_relay_request(
         encrypted_tool_choice,
         parallel_tool_calls: req.parallel_tool_calls,
         stream: req.stream,
-        max_tokens: req.max_tokens,
+        max_tokens: Some(effective_max_tokens),
         sampling: req.sampling(),
         response_format: req.response_format.clone(),
         reasoning_effort,
+        provider_e2ee_context,
     };
     let request_size = serde_json::to_vec(&relay_req)
         .map_err(|_| {
@@ -313,8 +407,9 @@ async fn build_relay_request(
 fn encrypt_text(
     session: &mut dyn CipherSession,
     value: &str,
+    field: &str,
 ) -> std::result::Result<String, AppError> {
-    session.encrypt(value.as_bytes()).map_err(|_| {
+    session.encrypt_field(value.as_bytes(), field).map_err(|_| {
         AppError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "encryption_error",
@@ -422,44 +517,73 @@ pub async fn chat_completions(
             return Err(error);
         }
     };
-    let content_result = decrypt_optional(
-        session.as_mut(),
-        completion.encrypted_content.as_deref(),
-        "content",
-    );
-    let content = audited(&mut audit, content_result)?;
-    let reasoning_result = decrypt_optional(
-        session.as_mut(),
-        completion.encrypted_reasoning_content.as_deref(),
-        "reasoning_content",
-    );
-    let reasoning = audited(&mut audit, reasoning_result)?;
-    let refusal_result = decrypt_optional(
-        session.as_mut(),
-        completion.encrypted_refusal.as_deref(),
-        "refusal",
-    );
-    let refusal = audited(&mut audit, refusal_result)?;
-    let mut tool_calls = Vec::with_capacity(completion.encrypted_tool_calls.len());
-    for tool_call in &completion.encrypted_tool_calls {
-        let name_result = decrypt_text(
-            session.as_mut(),
-            &tool_call.function.encrypted_name,
-            "tool call name",
-        );
-        let name = audited(&mut audit, name_result)?;
-        let arguments_result = decrypt_text(
-            session.as_mut(),
-            &tool_call.function.encrypted_arguments,
-            "tool call arguments",
-        );
-        let arguments = audited(&mut audit, arguments_result)?;
-        tool_calls.push(ToolCall {
-            id: tool_call.id.clone(),
-            kind: tool_call.kind.clone(),
-            function: FunctionCall { name, arguments },
+    let provider_completion = session
+        .decrypt_verified_completion(&completion)
+        .map_err(|error| {
+            AppError::new(
+                StatusCode::BAD_GATEWAY,
+                "provider_verification_error",
+                error.to_string(),
+            )
         });
-    }
+    let provider_completion = audited(&mut audit, provider_completion)?;
+    let (content, reasoning, refusal, tool_calls) = if let Some(decrypted) = provider_completion {
+        if !completion.encrypted_tool_calls.is_empty() {
+            let error = AppError::new(
+                StatusCode::BAD_GATEWAY,
+                "provider_verification_error",
+                "receipt-gated provider returned unsupported tool calls",
+            );
+            audit.fail(error.kind().to_string());
+            return Err(error);
+        }
+        (
+            decrypted.content,
+            decrypted.reasoning_content,
+            decrypted.refusal,
+            Vec::new(),
+        )
+    } else {
+        let content_result = decrypt_optional(
+            session.as_mut(),
+            completion.encrypted_content.as_deref(),
+            "content",
+        );
+        let content = audited(&mut audit, content_result)?;
+        let reasoning_result = decrypt_optional(
+            session.as_mut(),
+            completion.encrypted_reasoning_content.as_deref(),
+            "reasoning_content",
+        );
+        let reasoning = audited(&mut audit, reasoning_result)?;
+        let refusal_result = decrypt_optional(
+            session.as_mut(),
+            completion.encrypted_refusal.as_deref(),
+            "refusal",
+        );
+        let refusal = audited(&mut audit, refusal_result)?;
+        let mut tool_calls = Vec::with_capacity(completion.encrypted_tool_calls.len());
+        for tool_call in &completion.encrypted_tool_calls {
+            let name_result = decrypt_text(
+                session.as_mut(),
+                &tool_call.function.encrypted_name,
+                "tool call name",
+            );
+            let name = audited(&mut audit, name_result)?;
+            let arguments_result = decrypt_text(
+                session.as_mut(),
+                &tool_call.function.encrypted_arguments,
+                "tool call arguments",
+            );
+            let arguments = audited(&mut audit, arguments_result)?;
+            tool_calls.push(ToolCall {
+                id: tool_call.id.clone(),
+                kind: tool_call.kind.clone(),
+                function: FunctionCall { name, arguments },
+            });
+        }
+        (content, reasoning, refusal, tool_calls)
+    };
     if !tool_calls.is_empty() {
         let validation = validate_tool_calls(&tool_calls)
             .map_err(|message| AppError::new(StatusCode::BAD_GATEWAY, "upstream_error", message));

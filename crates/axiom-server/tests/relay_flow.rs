@@ -218,6 +218,7 @@ impl RelayApi for FakeRelay {
                     completion_tokens: Some(4),
                     total_tokens: Some(14),
                 },
+                proof: None,
             });
         }
 
@@ -259,6 +260,7 @@ impl RelayApi for FakeRelay {
                     completion_tokens: Some(8),
                     total_tokens: Some(28),
                 },
+                proof: None,
             });
         }
         Ok(RelayCompletion {
@@ -274,6 +276,7 @@ impl RelayApi for FakeRelay {
                 completion_tokens: Some(4),
                 total_tokens: Some(34),
             },
+            proof: None,
         })
     }
 

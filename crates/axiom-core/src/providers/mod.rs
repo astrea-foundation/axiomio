@@ -2,3 +2,4 @@
 //! attestation + cipher into the traits in [`crate::provider`].
 
 pub mod near;
+pub mod phala;

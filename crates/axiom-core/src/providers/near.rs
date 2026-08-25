@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::attestation;
 use crate::e2ee::{decode_public_key_hex, encrypt_to_model, ClientKeypair};
 use crate::error::Result;
-use crate::provider::{Attestor, CipherSession, ProviderCipher, VerifiedModel};
+use crate::provider::{AttestationRequest, Attestor, CipherSession, ProviderCipher, VerifiedModel};
 
 /// Matches the backend's usage/catalog provider id.
 pub const NEAR_PROVIDER_ID: &str = "near";
@@ -28,8 +28,8 @@ impl Attestor for NearAttestor {
         NEAR_ATTESTATION_PROTOCOL
     }
 
-    async fn verify_model(&self, base_url: &str, expected_model: &str) -> Result<VerifiedModel> {
-        attestation::verify_model(base_url, expected_model).await
+    async fn verify_model(&self, request: AttestationRequest<'_>) -> Result<VerifiedModel> {
+        attestation::verify_model(request.base_url, request.expected_model).await
     }
 }
 
@@ -44,8 +44,8 @@ impl ProviderCipher for NearCipher {
         NEAR_V2_ENCRYPTION_VERSION
     }
 
-    fn new_session(&self, model_key_material: &str) -> Result<Box<dyn CipherSession>> {
-        let model_pub = decode_public_key_hex(model_key_material)?;
+    fn new_session(&self, verified: &VerifiedModel) -> Result<Box<dyn CipherSession>> {
+        let model_pub = decode_public_key_hex(&verified.model_public_key_hex)?;
         Ok(Box::new(NearSession {
             keypair: ClientKeypair::generate(),
             model_pub,
@@ -88,7 +88,15 @@ mod tests {
         assert_eq!(cipher.encryption_version(), 2);
         // Encrypt to the session's own client key so we can decrypt without a model secret.
         let probe = ClientKeypair::generate();
-        let mut session = cipher.new_session(&probe.public_hex).unwrap();
+        let mut session = cipher
+            .new_session(&VerifiedModel {
+                model_public_key_hex: probe.public_hex.clone(),
+                tls_fingerprint: None,
+                checks: vec![],
+                provider_state: None,
+                expires_at_unix: None,
+            })
+            .unwrap();
         assert!(session.client_public_key_hex().is_some());
         let wire = session.encrypt(b"hello provider").unwrap();
         assert_eq!(probe.decrypt(&wire).unwrap(), b"hello provider");
