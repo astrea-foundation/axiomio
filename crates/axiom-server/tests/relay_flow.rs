@@ -292,6 +292,9 @@ impl RelayApi for FakeRelay {
                     refusal: None,
                     tool_calls: vec![],
                     sequence: 1,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Delta {
                     content: Some(delta_2),
@@ -299,6 +302,9 @@ impl RelayApi for FakeRelay {
                     refusal: None,
                     tool_calls: vec![],
                     sequence: 2,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Completed {
                     usage: RelayUsage {
@@ -307,6 +313,7 @@ impl RelayApi for FakeRelay {
                         total_tokens: Some(12),
                     },
                     finish_reason: Some("stop".into()),
+                    proof: None,
                 }),
             ])));
         }
@@ -352,6 +359,9 @@ impl RelayApi for FakeRelay {
                         }),
                     }],
                     sequence: 1,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Delta {
                     content: None,
@@ -369,6 +379,9 @@ impl RelayApi for FakeRelay {
                         }),
                     }],
                     sequence: 2,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Delta {
                     content: None,
@@ -386,6 +399,9 @@ impl RelayApi for FakeRelay {
                         }),
                     }],
                     sequence: 3,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Delta {
                     content: None,
@@ -403,6 +419,9 @@ impl RelayApi for FakeRelay {
                         }),
                     }],
                     sequence: 4,
+                    response_id: None,
+                    content_field: None,
+                    reasoning_field: None,
                 }),
                 Ok(RelayEvent::Completed {
                     usage: RelayUsage {
@@ -411,6 +430,7 @@ impl RelayApi for FakeRelay {
                         total_tokens: Some(28),
                     },
                     finish_reason: Some("tool_calls".into()),
+                    proof: None,
                 }),
             ];
             let events = stream::iter(events);
@@ -427,6 +447,9 @@ impl RelayApi for FakeRelay {
                 refusal: None,
                 tool_calls: vec![],
                 sequence: 1,
+                response_id: None,
+                content_field: None,
+                reasoning_field: None,
             }),
             Ok(RelayEvent::Completed {
                 usage: RelayUsage {
@@ -435,6 +458,7 @@ impl RelayApi for FakeRelay {
                     total_tokens: Some(34),
                 },
                 finish_reason: Some("stop".into()),
+                proof: None,
             }),
         ])))
     }

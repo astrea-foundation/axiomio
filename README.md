@@ -62,9 +62,8 @@ local proxy encrypts message content, tool names and descriptions, parameter
 schemas, named choices, arguments, and tool results to the model key accepted
 from verified Ed25519 TEE attestation; the backend only relays provider
 ciphertext. This complete tool-field contract currently applies to NEAR offerings. Phala ACI
-offerings reject tool calls and streaming until those paths have the same field-specific AAD and
-signed-receipt binding as Phala's non-streaming text path. This does not add tools to Axiom's
-frontend path.
+offerings support receipt-gated encrypted streaming, but still reject tool calls until every tool
+field has the same field-specific AAD contract. This does not add tools to Axiom's frontend path.
 
 Start the proxy with the real relay credential only in the proxy environment:
 
@@ -150,7 +149,7 @@ or `AXIOM_PROXY_PORT` if port 18484 is occupied.
 The desktop app's **History** tab shows the newest 100 terminal proxy requests,
 newest first, and refreshes while the tab is open. It separates completed,
 failed, and cancelled requests and shows safe evidence such as the model,
-provider, timestamps, duration, token counts, `near-v2` protocol/version,
+provider, timestamps, duration, token counts, provider E2EE protocol/version,
 attestation age and checks, and truncated SHA-256 model-key and TLS-SPKI
 fingerprints.
 
@@ -158,11 +157,12 @@ fingerprints.
 when all of the following are true for the same request:
 
 - terminal status is `completed`;
-- a verified Ed25519 TEE attestation supplied the model key;
-- the protocol is exactly `near-v2` with encryption version `2`;
+- a registered provider-specific TEE attestation supplied the model key;
+- the catalog identity matches a locally registered E2EE protocol and version;
 - the request was encrypted with a fresh ephemeral client key;
 - the backend accepted the attested key and encrypted request; and
-- the encrypted provider response was processed and decrypted locally.
+- the encrypted provider response was processed and decrypted locally, including any required
+  final stream receipt verification.
 
 A completed row with missing evidence is shown as **Incomplete evidence**, not
 verified. Failed and client/provider-cancelled requests retain their own status

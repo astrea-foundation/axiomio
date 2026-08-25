@@ -167,10 +167,14 @@ pub enum RelayEvent {
         refusal: Option<String>,
         tool_calls: Vec<RelayEncryptedToolCallDelta>,
         sequence: u64,
+        response_id: Option<String>,
+        content_field: Option<String>,
+        reasoning_field: Option<String>,
     },
     Completed {
         usage: RelayUsage,
         finish_reason: Option<String>,
+        proof: Option<serde_json::Value>,
     },
     Cancelled {
         reason: Option<String>,
@@ -235,6 +239,12 @@ struct RelayDeltaPayload {
     #[serde(default)]
     encrypted_tool_calls: Vec<RelayEncryptedToolCallDelta>,
     sequence: u64,
+    #[serde(default)]
+    response_id: Option<String>,
+    #[serde(default)]
+    content_field: Option<String>,
+    #[serde(default)]
+    reasoning_field: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -242,6 +252,8 @@ struct RelayCompletedPayload {
     usage: RelayUsage,
     #[serde(default)]
     finish_reason: Option<String>,
+    #[serde(default)]
+    proof: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -318,6 +330,9 @@ fn map_event(name: &str, data: &str) -> Option<Result<RelayEvent>> {
                     refusal: payload.encrypted_refusal_delta,
                     tool_calls: payload.encrypted_tool_calls,
                     sequence: payload.sequence,
+                    response_id: payload.response_id,
+                    content_field: payload.content_field,
+                    reasoning_field: payload.reasoning_field,
                 })
                 .map_err(|error| {
                     CoreError::Relay(format!("invalid encrypted delta event: {error}"))
@@ -328,6 +343,7 @@ fn map_event(name: &str, data: &str) -> Option<Result<RelayEvent>> {
                 .map(|payload| RelayEvent::Completed {
                     usage: payload.usage,
                     finish_reason: payload.finish_reason,
+                    proof: payload.proof,
                 })
                 .map_err(|error| {
                     CoreError::Relay(format!("invalid encrypted completed event: {error}"))
@@ -448,6 +464,8 @@ mod tests {
     fn relay_delta_mapping_is_typed_and_fail_closed() {
         let valid = serde_json::json!({
             "encrypted_delta": null,
+            "response_id": "chat-1",
+            "content_field": "choices.0.delta.content",
             "encrypted_tool_calls": [{
                 "index": 0,
                 "id": "call_1",
@@ -461,8 +479,12 @@ mod tests {
         });
         assert!(matches!(
             map_event("message.encrypted_delta", &valid.to_string()),
-            Some(Ok(RelayEvent::Delta { tool_calls, sequence: 1, .. }))
-                if tool_calls.len() == 1
+            Some(Ok(RelayEvent::Delta {
+                tool_calls,
+                sequence: 1,
+                response_id: Some(response_id),
+                ..
+            })) if tool_calls.len() == 1 && response_id == "chat-1"
         ));
 
         for malformed in [
@@ -485,6 +507,13 @@ mod tests {
 
     #[test]
     fn relay_completed_mapping_rejects_malformed_usage() {
+        assert!(matches!(
+            map_event(
+                "message.encrypted_completed",
+                r#"{"usage":{"prompt_tokens":1},"proof":{"receipt":{"api_version":"aci/1"}}}"#,
+            ),
+            Some(Ok(RelayEvent::Completed { proof: Some(_), .. }))
+        ));
         assert!(matches!(
             map_event(
                 "message.encrypted_completed",

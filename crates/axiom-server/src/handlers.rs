@@ -327,6 +327,7 @@ async fn build_relay_request(
             model: model.model.clone(),
             messages: plaintext_messages,
             max_tokens: effective_max_tokens,
+            stream: req.stream,
             sampling: req.sampling(),
             response_format: req.response_format.clone(),
             reasoning_effort: reasoning_effort.clone(),

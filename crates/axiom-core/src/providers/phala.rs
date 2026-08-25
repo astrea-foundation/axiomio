@@ -588,13 +588,34 @@ impl ProviderCipher for PhalaCipher {
         }
         let client_secret = StaticSecret::random_from_rng(OsRng);
         let client_public = PublicKey::from(&client_secret);
+        let mut eligible_session_ids = state
+            .worker_sessions
+            .iter()
+            .map(|(session_id, worker)| (session_id.clone(), worker.expires_at))
+            .collect::<Vec<_>>();
+        eligible_session_ids.sort_by(|(left_id, left_expiry), (right_id, right_expiry)| {
+            right_expiry
+                .cmp(left_expiry)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        eligible_session_ids.truncate(128);
+        let eligible_session_ids = eligible_session_ids
+            .into_iter()
+            .map(|(session_id, _)| session_id)
+            .collect::<Vec<_>>();
+        if eligible_session_ids.is_empty() {
+            return Err(provider("Phala has no preverified worker sessions"));
+        }
         Ok(Box::new(PhalaSession {
             state,
             client_secret,
             client_public_key_hex: hex::encode(client_public.as_bytes()),
+            eligible_session_ids,
             nonce: random_nonce_hex(),
             timestamp: now_unix(),
             plaintext_request_hash: None,
+            streamed_content: String::new(),
+            streamed_reasoning: String::new(),
         }))
     }
 }
@@ -603,9 +624,12 @@ struct PhalaSession {
     state: PhalaAttestationState,
     client_secret: StaticSecret,
     client_public_key_hex: String,
+    eligible_session_ids: Vec<String>,
     nonce: String,
     timestamp: u64,
     plaintext_request_hash: Option<String>,
+    streamed_content: String,
+    streamed_reasoning: String,
 }
 
 fn request_aad(model: &str, nonce: &str, timestamp: u64, field: &str) -> Result<Vec<u8>> {
@@ -750,7 +774,12 @@ fn exact_plaintext_body(request: &PlainProviderRequest, session_ids: &[String]) 
         "max_tokens",
         &Value::Number(request.max_tokens.into()),
     )?;
-    append_json_member(&mut output, &mut first, "stream", &Value::Bool(false))?;
+    append_json_member(
+        &mut output,
+        &mut first,
+        "stream",
+        &Value::Bool(request.stream),
+    )?;
     if !first {
         output.push(b',');
     }
@@ -761,6 +790,14 @@ fn exact_plaintext_body(request: &PlainProviderRequest, session_ids: &[String]) 
             .map_err(|error| provider(format!("JSON failed: {error}")))?,
     );
     output.extend_from_slice(b",\"zdr\":true}");
+    if request.stream {
+        append_json_member(
+            &mut output,
+            &mut first,
+            "stream_options",
+            &serde_json::json!({"include_usage": true}),
+        )?;
+    }
     if let Some(sampling) = &request.sampling {
         let values = sampling
             .as_object()
@@ -821,6 +858,240 @@ fn receipt_event<'a>(
         .ok_or_else(|| provider(format!("Phala receipt omitted {event_type}")))
 }
 
+impl PhalaSession {
+    fn verify_proof_bytes(&self, proof: &Value) -> Result<Vec<u8>> {
+        let expected_request_hash = self
+            .plaintext_request_hash
+            .as_deref()
+            .ok_or_else(|| provider("Phala request context was not prepared"))?;
+        let proof = proof
+            .as_object()
+            .ok_or_else(|| provider("Phala stream omitted its proof"))?;
+        let response_base64 = proof
+            .get("response_body_base64")
+            .and_then(Value::as_str)
+            .ok_or_else(|| provider("Phala proof omitted encrypted response bytes"))?;
+        let response_bytes = base64::engine::general_purpose::STANDARD
+            .decode(response_base64)
+            .map_err(|_| provider("Phala encrypted response base64 is invalid"))?;
+        let receipt = proof
+            .get("receipt")
+            .and_then(Value::as_object)
+            .ok_or_else(|| provider("Phala proof omitted its receipt"))?;
+        if receipt.get("api_version").and_then(Value::as_str) != Some("aci/1") {
+            return Err(provider("Phala receipt is not aci/1"));
+        }
+        if receipt
+            .get("workload_keyset_digest")
+            .and_then(Value::as_str)
+            != Some(&self.state.keyset_digest)
+            || receipt.get("model").and_then(Value::as_str) != Some(&self.state.model)
+        {
+            return Err(provider("Phala receipt identity mismatch"));
+        }
+        let key_id = receipt
+            .get("key_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| provider("Phala receipt key id is missing"))?;
+        let receipt_key = self
+            .state
+            .receipt_public_keys
+            .get(key_id)
+            .ok_or_else(|| provider("Phala receipt key was not attested"))?;
+        let signature = receipt
+            .get("signature")
+            .and_then(Value::as_str)
+            .ok_or_else(|| provider("Phala receipt signature is missing"))?;
+        let signature = Signature::from_slice(
+            &hex::decode(signature).map_err(|_| provider("Phala receipt signature is invalid"))?,
+        )
+        .map_err(|_| provider("Phala receipt signature is invalid"))?;
+        let verifying_key = VerifyingKey::from_bytes(
+            &decode_32("receipt public key", receipt_key)
+                .map_err(|_| provider("Phala receipt public key is invalid"))?,
+        )
+        .map_err(|_| provider("Phala receipt public key is invalid"))?;
+        let mut unsigned = receipt.clone();
+        unsigned.remove("signature");
+        verifying_key
+            .verify(
+                &canonical_json(&Value::Object(unsigned))
+                    .map_err(|_| provider("Phala receipt canonicalization failed"))?,
+                &signature,
+            )
+            .map_err(|_| provider("Phala receipt signature is invalid"))?;
+        if receipt_event(receipt, "request.received")?
+            .get("body_hash")
+            .and_then(Value::as_str)
+            != Some(expected_request_hash)
+        {
+            return Err(provider(
+                "Phala receipt does not bind the exact local request",
+            ));
+        }
+        if receipt_event(receipt, "response.returned")?
+            .get("body_hash")
+            .and_then(Value::as_str)
+            != Some(&sha256_digest(&response_bytes))
+        {
+            return Err(provider(
+                "Phala receipt does not bind the encrypted response bytes",
+            ));
+        }
+        let upstream = receipt_event(receipt, "upstream.verified")?;
+        if upstream.get("result").and_then(Value::as_str) != Some("verified")
+            || upstream.get("required").and_then(Value::as_bool) != Some(true)
+            || upstream
+                .get("model_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            return Err(provider("Phala did not require a verified model worker"));
+        }
+        let session_id = upstream
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .strip_prefix("as_")
+            .unwrap_or_else(|| {
+                upstream
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            })
+            .to_lowercase();
+        if !self.eligible_session_ids.contains(&session_id) {
+            return Err(provider(
+                "Phala receipt cites a worker outside the preverified eligible set",
+            ));
+        }
+        let worker = self
+            .state
+            .worker_sessions
+            .get(&session_id)
+            .ok_or_else(|| provider("Phala receipt cites a worker not preverified locally"))?;
+        let served_at = receipt
+            .get("served_at")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| provider("Phala receipt served_at is invalid"))?;
+        if !(worker.established_at <= served_at && served_at <= worker.expires_at) {
+            return Err(provider(
+                "Phala receipt falls outside the worker session lifetime",
+            ));
+        }
+        Ok(response_bytes)
+    }
+
+    fn decrypt_verified_stream(&self, response_bytes: &[u8]) -> Result<(String, String)> {
+        let raw = std::str::from_utf8(response_bytes)
+            .map_err(|_| provider("Phala stream is not UTF-8 SSE"))?;
+        let normalized = raw.replace("\r\n", "\n");
+        let mut response_id = String::new();
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        let mut done = false;
+        for frame in normalized.split("\n\n") {
+            let data_lines = frame
+                .lines()
+                .filter_map(|line| {
+                    if line == "data" {
+                        Some("")
+                    } else {
+                        line.strip_prefix("data:")
+                            .map(|value| value.strip_prefix(' ').unwrap_or(value))
+                    }
+                })
+                .collect::<Vec<_>>();
+            if data_lines.is_empty() {
+                continue;
+            }
+            let data = data_lines.join("\n");
+            if data == "[DONE]" {
+                if done {
+                    return Err(provider("Phala stream has duplicate completion markers"));
+                }
+                done = true;
+                continue;
+            }
+            if done {
+                return Err(provider("Phala stream has data after completion"));
+            }
+            let event: Value = serde_json::from_str(&data)
+                .map_err(|_| provider("Phala stream contains invalid JSON"))?;
+            let event = event
+                .as_object()
+                .ok_or_else(|| provider("Phala stream event is not an object"))?;
+            if let Some(event_id) = event.get("id").and_then(Value::as_str) {
+                if !event_id.is_empty() {
+                    if !response_id.is_empty() && response_id != event_id {
+                        return Err(provider("Phala stream changed response id"));
+                    }
+                    response_id = event_id.to_string();
+                }
+            }
+            let Some(choices) = event.get("choices") else {
+                continue;
+            };
+            let choices = choices
+                .as_array()
+                .ok_or_else(|| provider("Phala stream choices are invalid"))?;
+            for (position, choice) in choices.iter().enumerate() {
+                let choice = choice
+                    .as_object()
+                    .ok_or_else(|| provider("Phala stream choice is invalid"))?;
+                let choice_index = choice
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(position as u64);
+                if choice_index != 0 {
+                    return Err(provider("Phala stream returned an unexpected choice"));
+                }
+                let Some(delta) = choice.get("delta") else {
+                    continue;
+                };
+                let delta = delta
+                    .as_object()
+                    .ok_or_else(|| provider("Phala stream delta is invalid"))?;
+                for member in ["content", "reasoning_content", "reasoning"] {
+                    let Some(wire) = delta.get(member).and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if wire.is_empty() {
+                        continue;
+                    }
+                    if response_id.is_empty() {
+                        return Err(provider("Phala encrypted delta omitted response id"));
+                    }
+                    let plaintext = decrypt_field(
+                        wire,
+                        &self.client_secret,
+                        &response_aad(
+                            &self.state.model,
+                            &self.nonce,
+                            self.timestamp,
+                            &response_id,
+                            &format!("choices.{choice_index}.delta.{member}"),
+                        )?,
+                    )?;
+                    if member == "content" {
+                        content.push_str(&plaintext);
+                    } else {
+                        reasoning.push_str(&plaintext);
+                    }
+                }
+            }
+        }
+        if !done {
+            return Err(provider("Phala stream ended without its completion marker"));
+        }
+        if response_id.is_empty() {
+            return Err(provider("Phala stream omitted its response id"));
+        }
+        Ok((content, reasoning))
+    }
+}
+
 impl CipherSession for PhalaSession {
     fn client_public_key_hex(&self) -> Option<String> {
         Some(self.client_public_key_hex.clone())
@@ -833,7 +1104,7 @@ impl CipherSession for PhalaSession {
     }
 
     fn supports_streaming(&self) -> bool {
-        false
+        true
     }
 
     fn encrypt(&mut self, _plaintext: &[u8]) -> Result<String> {
@@ -844,6 +1115,44 @@ impl CipherSession for PhalaSession {
         Err(provider(
             "Phala responses require receipt-gated completion decryption",
         ))
+    }
+
+    fn decrypt_stream_field(
+        &mut self,
+        wire: &str,
+        response_id: Option<&str>,
+        field: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        let response_id = response_id
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| provider("Phala stream delta omitted response id"))?;
+        let field = field
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "choices.0.delta.content"
+                        | "choices.0.delta.reasoning"
+                        | "choices.0.delta.reasoning_content"
+                )
+            })
+            .ok_or_else(|| provider("Phala stream delta has an unexpected response field"))?;
+        let plaintext = decrypt_field(
+            wire,
+            &self.client_secret,
+            &response_aad(
+                &self.state.model,
+                &self.nonce,
+                self.timestamp,
+                response_id,
+                field,
+            )?,
+        )?;
+        if field == "choices.0.delta.content" {
+            self.streamed_content.push_str(&plaintext);
+        } else {
+            self.streamed_reasoning.push_str(&plaintext);
+        }
+        Ok(plaintext.into_bytes())
     }
 
     fn encrypt_field(&mut self, plaintext: &[u8], field: &str) -> Result<String> {
@@ -858,12 +1167,7 @@ impl CipherSession for PhalaSession {
         if request.model != self.state.model {
             return Err(provider("Phala plaintext request model mismatch"));
         }
-        let session_ids = self
-            .state
-            .worker_sessions
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+        let session_ids = self.eligible_session_ids.clone();
         let request_hash = sha256_digest(&exact_plaintext_body(request, &session_ids)?);
         self.plaintext_request_hash = Some(request_hash.clone());
         Ok(Some(serde_json::json!({
@@ -986,6 +1290,11 @@ impl CipherSession for PhalaSession {
                     .unwrap_or_default()
             })
             .to_lowercase();
+        if !self.eligible_session_ids.contains(&session_id) {
+            return Err(provider(
+                "Phala receipt cites a worker outside the preverified eligible set",
+            ));
+        }
         let worker = self
             .state
             .worker_sessions
@@ -1052,6 +1361,21 @@ impl CipherSession for PhalaSession {
             refusal: None,
         }))
     }
+
+    fn verify_stream_completion(&mut self, proof: Option<&Value>) -> Result<()> {
+        let proof = proof.ok_or_else(|| provider("Phala stream omitted its final proof"))?;
+        let response_bytes = self.verify_proof_bytes(proof)?;
+        let (verified_content, verified_reasoning) =
+            self.decrypt_verified_stream(&response_bytes)?;
+        if verified_content != self.streamed_content
+            || verified_reasoning != self.streamed_reasoning
+        {
+            return Err(provider(
+                "Phala provisional deltas do not match the receipt-verified stream",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1069,6 +1393,7 @@ mod tests {
                 has_extended_fields: false,
             }],
             max_tokens: 8,
+            stream: false,
             sampling: None,
             response_format: None,
             reasoning_effort: None,

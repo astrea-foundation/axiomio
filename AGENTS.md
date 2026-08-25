@@ -16,6 +16,15 @@ model identity, session validity, and exact receipt-cited worker all verify. No
 unverified provider, worker, session, key, response, or fallback may be
 accepted.
 
+For an authenticated provider-E2EE streaming protocol, the local client may
+decrypt and render or relay each AEAD-authenticated delta as provisional. A
+downstream consumer must treat the stream as incomplete until its terminal
+event. The final signed receipt must bind the exact complete encrypted stream
+and exact pre-verified worker before the client marks the response successful
+or persists it as verified. A missing/invalid receipt, reordered or truncated
+stream, decryption failure, or transcript mismatch must fail closed and must
+never emit a successful terminal event.
+
 Do not add plaintext inference modes, TLS fallbacks, server-side prompt
 construction, backend system-message injection, or plaintext message caches.
 The local proxy owns model-message construction, attestation verification,

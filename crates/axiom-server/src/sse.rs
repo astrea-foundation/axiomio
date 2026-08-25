@@ -39,6 +39,18 @@ fn decrypt_utf8(session: &mut dyn CipherSession, wire: &str) -> Option<String> {
         .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
+fn decrypt_stream_utf8(
+    session: &mut dyn CipherSession,
+    wire: &str,
+    response_id: Option<&str>,
+    field: Option<&str>,
+) -> Option<String> {
+    session
+        .decrypt_stream_field(wire, response_id, field)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
 fn valid_tool_call_id(value: &str) -> bool {
     !value.is_empty()
         && value.chars().count() <= 256
@@ -67,6 +79,7 @@ pub fn openai_stream(
 
         let mut prompt_tokens = 0u32;
         let mut completion_tokens = 0u32;
+        let mut expected_sequence = 1u64;
 
         while let Some(item) = relay.next().await {
             match item {
@@ -75,11 +88,28 @@ pub fn openai_stream(
                     reasoning,
                     refusal,
                     tool_calls,
-                    ..
+                    sequence,
+                    response_id,
+                    content_field,
+                    reasoning_field,
                 }) => {
+                    if sequence != expected_sequence {
+                        audit.fail("stream_sequence_error");
+                        yield Ok(to_event(&serde_json::json!({
+                            "error": {"message": "provider stream sequence is invalid", "type": "provider_verification_error"}
+                        })));
+                        yield Ok(Event::default().data("[DONE]"));
+                        return;
+                    }
+                    expected_sequence += 1;
                     let mut delta = Delta::default();
                     if let Some(wire) = content {
-                        match decrypt_utf8(session.as_mut(), &wire) {
+                        match decrypt_stream_utf8(
+                            session.as_mut(),
+                            &wire,
+                            response_id.as_deref(),
+                            content_field.as_deref(),
+                        ) {
                             Some(value) => {
                                 audit.response_decrypted();
                                 delta.content = Some(value);
@@ -95,7 +125,12 @@ pub fn openai_stream(
                         }
                     }
                     if let Some(wire) = reasoning {
-                        match decrypt_utf8(session.as_mut(), &wire) {
+                        match decrypt_stream_utf8(
+                            session.as_mut(),
+                            &wire,
+                            response_id.as_deref(),
+                            reasoning_field.as_deref(),
+                        ) {
                             Some(value) => {
                                 audit.response_decrypted();
                                 delta.reasoning_content = Some(value);
@@ -210,10 +245,23 @@ pub fn openai_stream(
                 Ok(RelayEvent::Completed {
                     usage,
                     finish_reason,
+                    proof,
                 }) => {
                     prompt_tokens = usage.prompt_tokens.unwrap_or(0);
                     completion_tokens = usage.completion_tokens.unwrap_or(0);
                     let finish_reason = finish_reason.unwrap_or_else(|| "stop".to_string());
+                    if let Err(error) = session.verify_stream_completion(proof.as_ref()) {
+                        audit.fail_with_usage(
+                            "provider_verification_error",
+                            prompt_tokens,
+                            completion_tokens,
+                        );
+                        yield Ok(to_event(&serde_json::json!({
+                            "error": {"message": error.to_string(), "type": "provider_verification_error"}
+                        })));
+                        yield Ok(Event::default().data("[DONE]"));
+                        return;
+                    }
                     if validate_finish_reason(&finish_reason).is_err() {
                         audit.fail_with_usage(
                             "upstream_error",

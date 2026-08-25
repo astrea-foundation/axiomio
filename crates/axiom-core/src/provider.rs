@@ -86,6 +86,7 @@ pub struct PlainProviderRequest {
     pub model: String,
     pub messages: Vec<PlainProviderMessage>,
     pub max_tokens: u32,
+    pub stream: bool,
     pub sampling: Option<serde_json::Value>,
     pub response_format: Option<serde_json::Value>,
     pub reasoning_effort: Option<String>,
@@ -108,6 +109,17 @@ pub trait CipherSession: Send {
     fn is_ready(&self) -> bool;
     fn encrypt(&mut self, plaintext: &[u8]) -> Result<String>;
     fn decrypt(&mut self, wire: &str) -> Result<Vec<u8>>;
+
+    /// Authenticate and decrypt one streamed response field. Protocols whose response AAD does
+    /// not depend on response metadata inherit the ordinary decrypt path.
+    fn decrypt_stream_field(
+        &mut self,
+        wire: &str,
+        _response_id: Option<&str>,
+        _field: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        self.decrypt(wire)
+    }
 
     fn supports_streaming(&self) -> bool {
         true
@@ -134,6 +146,12 @@ pub trait CipherSession: Send {
         _completion: &RelayCompletion,
     ) -> Result<Option<DecryptedProviderCompletion>> {
         Ok(None)
+    }
+
+    /// Verify the final provider proof over the exact encrypted stream. Streamed plaintext is
+    /// provisional until this succeeds; callers must not emit a successful terminal event first.
+    fn verify_stream_completion(&mut self, _proof: Option<&serde_json::Value>) -> Result<()> {
+        Ok(())
     }
 }
 
