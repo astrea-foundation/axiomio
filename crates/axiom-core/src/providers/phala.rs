@@ -603,6 +603,11 @@ impl ProviderCipher for PhalaCipher {
             .into_iter()
             .map(|(session_id, _)| session_id)
             .collect::<Vec<_>>();
+        // Keep freshness as the selection criterion, but canonicalize the selected set before it
+        // becomes part of the exact request body and provider context. The backend rejects
+        // duplicate or non-canonical session-id lists before relaying ciphertext.
+        let mut eligible_session_ids = eligible_session_ids;
+        eligible_session_ids.sort();
         if eligible_session_ids.is_empty() {
             return Err(provider("Phala has no preverified worker sessions"));
         }
@@ -1428,5 +1433,67 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("content addressed"));
+    }
+
+    #[test]
+    fn selected_worker_sessions_are_canonical_after_freshness_selection() {
+        let now = now_unix();
+        let older_id = "aa".repeat(32);
+        let fresher_id = "ff".repeat(32);
+        let worker_sessions = BTreeMap::from([
+            (
+                older_id.clone(),
+                PhalaWorkerSession {
+                    session_id: older_id.clone(),
+                    established_at: now.saturating_sub(20),
+                    expires_at: now + 300,
+                    record: Value::Null,
+                },
+            ),
+            (
+                fresher_id.clone(),
+                PhalaWorkerSession {
+                    session_id: fresher_id.clone(),
+                    established_at: now.saturating_sub(10),
+                    expires_at: now + 600,
+                    record: Value::Null,
+                },
+            ),
+        ]);
+        let state = PhalaAttestationState {
+            model: "org/model".into(),
+            keyset_digest: format!("sha256:{}", "12".repeat(32)),
+            gateway_public_key_hex: "34".repeat(32),
+            receipt_public_keys: BTreeMap::new(),
+            worker_sessions,
+        };
+        let verified = VerifiedModel {
+            model_public_key_hex: state.gateway_public_key_hex.clone(),
+            tls_fingerprint: None,
+            checks: Vec::new(),
+            provider_state: Some(serde_json::to_value(state).unwrap()),
+            expires_at_unix: Some(now + 300),
+        };
+        let mut session = PhalaCipher.new_session(&verified).unwrap();
+        let request = PlainProviderRequest {
+            model: "org/model".into(),
+            messages: vec![crate::provider::PlainProviderMessage {
+                role: "user".into(),
+                content: Some("hello".into()),
+                assistant_null_content: false,
+                has_extended_fields: false,
+            }],
+            max_tokens: 8,
+            stream: true,
+            sampling: None,
+            response_format: None,
+            reasoning_effort: None,
+            has_tools: false,
+        };
+        let context = session.prepare_request_context(&request).unwrap().unwrap();
+        assert_eq!(
+            context["session_ids"],
+            serde_json::json!([older_id, fresher_id])
+        );
     }
 }
