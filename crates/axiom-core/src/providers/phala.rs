@@ -34,11 +34,8 @@ pub const PHALA_ACI_V2_ENCRYPTION_VERSION: u8 = 2;
 const E2EE_ALGORITHM: &str = "x25519-aes-256-gcm-hkdf-sha256";
 const E2EE_KEY_ID: &str = "dstack-kms-e2ee-x25519-v1";
 const HKDF_INFO: &[u8] = b"aci.e2ee.v2.x25519";
-const APPROVED_GATEWAY_COMMIT: &str = "b6b5c1b82f6fc59490db5a5255bf4493805e66c6";
-const APPROVED_REPOSITORIES: &[&str] = &[
-    "https://github.com/Dstack-TEE/private-ai-gateway",
-    "https://github.com/Dstack-TEE/private-ai-gateway.git",
-];
+const GATEWAY_REPOSITORY_ENV: &str = "PRIVATE_AI_GATEWAY_REPO_URL";
+const GATEWAY_COMMIT_ENV: &str = "PRIVATE_AI_GATEWAY_REPO_COMMIT";
 
 #[derive(Debug, Deserialize)]
 struct CollateralWire {
@@ -220,6 +217,43 @@ fn replay_rtmr3(event_log: &str) -> Result<([u8; 48], String)> {
         ));
     }
     Ok((current, compose_hashes.remove(0)))
+}
+
+fn measured_gateway_source(app_compose: &str) -> Result<(String, String)> {
+    let manifest: Value = serde_json::from_str(app_compose).map_err(|error| {
+        attestation(format!(
+            "Phala gateway compose manifest is invalid: {error}"
+        ))
+    })?;
+    let compose_file = manifest
+        .as_object()
+        .and_then(|value| value.get("docker_compose_file"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| attestation("Phala gateway manifest has no Docker Compose workflow"))?;
+    let environment_value = |name: &str| -> Result<String> {
+        let prefix = format!("- {name}=");
+        let values = compose_file
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.strip_prefix(&prefix))
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if values.len() != 1 {
+            return Err(attestation(format!(
+                "Phala measured workflow has no unique {name}"
+            )));
+        }
+        Ok(values[0].to_string())
+    };
+    let repository = environment_value(GATEWAY_REPOSITORY_ENV)?;
+    if !repository.starts_with("https://") || repository.chars().any(char::is_whitespace) {
+        return Err(attestation("Phala measured source repository is invalid"));
+    }
+    let commit = environment_value(GATEWAY_COMMIT_ENV)?.to_lowercase();
+    if commit.len() != 40 || !commit.chars().all(|value| value.is_ascii_hexdigit()) {
+        return Err(attestation("Phala measured source commit is invalid"));
+    }
+    Ok((repository, commit))
 }
 
 fn verify_worker_session(value: &Value, minimum_ttl: u64) -> Result<PhalaWorkerSession> {
@@ -443,23 +477,22 @@ impl Attestor for PhalaAttestor {
                 "Phala gateway compose file is not measured by the quote",
             ));
         }
+        let (source_repository, source_commit) = measured_gateway_source(app_compose)?;
         let provenance = gateway_attestation
             .get("source_provenance")
             .and_then(Value::as_object)
             .ok_or_else(|| attestation("Phala gateway source provenance is missing"))?;
-        if !APPROVED_REPOSITORIES.contains(&required_str(
-            provenance,
-            "repo_url",
-            "gateway source repository",
-        )?) {
+        if required_str(provenance, "repo_url", "gateway source repository")? != source_repository {
             return Err(attestation(
-                "Phala gateway source repository is not approved",
+                "Phala gateway source repository does not match the measured workflow",
             ));
         }
-        let source_commit =
-            required_str(provenance, "repo_commit", "gateway source commit")?.to_lowercase();
-        if source_commit != APPROVED_GATEWAY_COMMIT {
-            return Err(attestation("Phala gateway source commit is not approved"));
+        if required_str(provenance, "repo_commit", "gateway source commit")?.to_lowercase()
+            != source_commit
+        {
+            return Err(attestation(
+                "Phala gateway source commit does not match the measured workflow",
+            ));
         }
 
         let e2ee_entries = keyset_object
@@ -1433,6 +1466,35 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("content addressed"));
+    }
+
+    #[test]
+    fn gateway_source_is_read_from_the_measured_workflow_without_an_allowlist() {
+        let repository = "https://github.com/example/private-gateway.git";
+        let commit = "66".repeat(20);
+        let compose = serde_json::json!({
+            "manifest_version": 2,
+            "docker_compose_file": format!(
+                "services:\n  launcher:\n    environment:\n      - {GATEWAY_REPOSITORY_ENV}={repository}\n      - {GATEWAY_COMMIT_ENV}={commit}"
+            ),
+        })
+        .to_string();
+        assert_eq!(
+            measured_gateway_source(&compose).unwrap(),
+            (repository.to_string(), commit.clone())
+        );
+
+        let duplicate = serde_json::json!({
+            "docker_compose_file": format!(
+                "- {GATEWAY_REPOSITORY_ENV}={repository}\n- {GATEWAY_COMMIT_ENV}={commit}\n- {GATEWAY_COMMIT_ENV}={} ",
+                "77".repeat(20)
+            ),
+        })
+        .to_string();
+        assert!(measured_gateway_source(&duplicate)
+            .unwrap_err()
+            .to_string()
+            .contains("no unique"));
     }
 
     #[test]

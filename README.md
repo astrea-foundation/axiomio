@@ -62,8 +62,11 @@ local proxy encrypts message content, tool names and descriptions, parameter
 schemas, named choices, arguments, and tool results to the model key accepted
 from verified Ed25519 TEE attestation; the backend only relays provider
 ciphertext. This complete tool-field contract currently applies to NEAR offerings. Phala ACI
-offerings support receipt-gated encrypted streaming, but still reject tool calls until every tool
-field has the same field-specific AAD contract. This does not add tools to Axiom's frontend path.
+offerings verify the exact quote-bound workflow manifest and require its declared source repository
+and commit to match the gateway provenance; those values are exposed for inspection rather than
+compared to an Axiom-maintained approved-commit list. Phala supports receipt-gated encrypted
+streaming, but still rejects tool calls until every tool field has the same field-specific AAD
+contract. This does not add tools to Axiom's frontend path.
 
 Start the proxy with the real relay credential only in the proxy environment:
 
