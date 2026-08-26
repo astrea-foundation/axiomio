@@ -1,5 +1,16 @@
 # Agent Instructions
 
+## Repository Status — Deprecated
+
+AxiomIO is deprecated and archived. Do not implement features, provider changes,
+compatibility work, version bumps, tags, or releases in this repository. All
+active product development belongs in `/home/salt/sync2/work/axiomai`, whose
+canonical remote is `https://github.com/astrea-foundation/axiomai`.
+
+Treat the code below as historical reference only. If asked to change AxiomIO,
+redirect the work to AxiomAI unless the user explicitly requests an emergency
+security correction to the retired release.
+
 ## Security Invariant
 
 AxiomIO only supports TEE-attested provider E2EE for inference. Every chat model

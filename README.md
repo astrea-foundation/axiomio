@@ -1,4 +1,13 @@
-# AxiomIO
+# AxiomIO (deprecated)
+
+> [!CAUTION]
+> AxiomIO is deprecated and this repository is archived. Version `0.1.6` is the final legacy
+> release; do not add features, provider integrations, compatibility updates, or new releases here.
+> Development has moved to [AxiomAI](https://github.com/astrea-foundation/axiomai), which includes
+> AxiomCLI, its TUI, the secure inference client and local proxy, and the desktop application. The
+> replacement repository is private while the new product is under development.
+
+See [DEPRECATED.md](DEPRECATED.md) for the migration status.
 
 A local OpenAI-compatible endpoint that gives any tool TEE-attested, end-to-end-encrypted access
 to Axiom models. Point `OPENAI_BASE_URL` at `http://127.0.0.1:8484/v1` and set your `axm_…` key —
